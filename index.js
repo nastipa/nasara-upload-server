@@ -76,7 +76,6 @@ app.post("/delete-account", async (req, res) => {
       return res.status(401).json({ error: "No token provided" });
     }
 
-    // 🔥 VERIFY USER
     const { data, error: userError } =
       await supabaseAdmin.auth.getUser(token);
 
@@ -86,46 +85,25 @@ app.post("/delete-account", async (req, res) => {
 
     const user_id = data.user.id;
 
-    /* ================= DELETE USER DATA SAFELY ================= */
-
-    const { error: postErr } = await supabaseAdmin
-      .from("posts")
-      .delete()
-      .eq("user_id", user_id);
-
-    if (postErr) throw postErr;
-
-    const { error: likeErr } = await supabaseAdmin
-      .from("likes")
-      .delete()
-      .eq("user_id", user_id);
-
-    if (likeErr) throw likeErr;
-
-    const { error: commentErr } = await supabaseAdmin
-      .from("comments")
-      .delete()
-      .eq("user_id", user_id);
-
-    if (commentErr) throw commentErr;
-
-    /* ================= DELETE AUTH USER ================= */
-    const { error: authErr } =
+    const { error } =
       await supabaseAdmin.auth.admin.deleteUser(user_id);
 
-    if (authErr) throw authErr;
+    if (error) {
+      console.log("DELETE ERROR:", error);
+      return res.status(500).json({
+        error: error.message,
+      });
+    }
 
     return res.json({ success: true });
 
   } catch (err) {
     console.log("Delete error:", err);
     return res.status(500).json({
-      success: false,
-      error: err.message || "Delete failed",
+      error: "Delete failed",
     });
   }
 });
-
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
 app.get("/", (req, res) => {
   res.send("Nasara upload server running 🚀");
