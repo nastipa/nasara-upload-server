@@ -4,7 +4,10 @@ const cors = require("cors");
 const AWS = require("aws-sdk");
 require("dotenv").config();
 
+
 const { createClient } = require("@supabase/supabase-js");
+const fetch = require("node-fetch");
+
 
 const app = express();
 app.use(cors());
@@ -102,6 +105,49 @@ app.post("/delete-account", async (req, res) => {
     return res.status(500).json({
       error: "Delete failed",
     });
+  }
+});
+/* ================= SEND PUSH ================= */
+async function sendPush(tokens, title, body) {
+  const messages = tokens.map((token) => ({
+    to: token,
+    sound: "default",
+    title,
+    body,
+  }));
+
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(messages),
+  });
+}
+/* ================= PUSH ROUTE ================= */
+app.post("/send-push", async (req, res) => {
+  try {
+    const { title, body, type, ref_id } = req.body;
+
+    const { data: users } = await supabaseAdmin
+      .from("profiles")
+      .select("push_token");
+
+    const tokens = users
+      ?.map((u) => u.push_token)
+      .filter(Boolean);
+
+    if (!tokens || tokens.length === 0) {
+      return res.json({ success: true });
+    }
+
+    // 🔥 use helper
+    await sendPush(tokens, title, body, { type, ref_id });
+
+    res.json({ success: true });
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "Push failed" });
   }
 });
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
