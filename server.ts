@@ -5,7 +5,8 @@ const app = express();
 
 app.use(express.json());
 
-app.use(uploadRoutes);
+// 🔥 FORCE PREFIX (avoids confusion)
+app.use("/", uploadRoutes);
 
 app.get("/", (_, res) => {
   res.send("Server running 🚀");
