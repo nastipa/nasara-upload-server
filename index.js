@@ -108,21 +108,46 @@ app.post("/delete-account", async (req, res) => {
   }
 });
 /* ================= SEND PUSH ================= */
-async function sendPush(tokens, title, body) {
-  const messages = tokens.map((token) => ({
-    to: token,
-    sound: "default",
-    title,
-    body,
-  }));
 
-  await fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(messages),
-  });
+async function sendPush(
+  tokens,
+  title,
+  body,
+  data = {}
+) {
+  const messages =
+    tokens.map((token) => ({
+      to: token,
+
+      sound: "default",
+
+      title,
+
+      body,
+
+      data,
+
+      priority: "high",
+
+      channelId:
+        "default",
+    }));
+
+  await fetch(
+    "https://exp.host/--/api/v2/push/send",
+    {
+      method: "POST",
+
+      headers: {
+        "Content-Type":
+          "application/json",
+      },
+
+      body: JSON.stringify(
+        messages
+      ),
+    }
+  );
 }
 /* ================= PUSH ROUTE ================= */
 app.post("/send-push", async (req, res) => {
@@ -142,7 +167,15 @@ app.post("/send-push", async (req, res) => {
     }
 
     // 🔥 use helper
-    await sendPush(tokens, title, body, { type, ref_id });
+   await sendPush(
+  tokens,
+  title,
+  body,
+  {
+    type,
+    ref_id,
+  }
+);
 
     res.json({ success: true });
   } catch (err) {
