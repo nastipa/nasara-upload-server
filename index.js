@@ -72,14 +72,15 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 /* ================= CREATE ADMIN ================= */
 app.post("/create-admin", async (req, res) => {
   try {
-    const { email, password, name, role } = req.body;
+    const { email, password, full_name, system } = req.body;
+    // system = "nasara" OR "coalition"
 
-    if (!email || !password || !name) {
+    if (!email || !password) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // 1. Create auth user
-    const { data: user, error: authError } =
+    // 1. Create Auth user
+    const { data, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
         password,
@@ -90,54 +91,75 @@ app.post("/create-admin", async (req, res) => {
       return res.status(400).json({ error: authError.message });
     }
 
-    // 2. Auto insert into admins table
-    const { error: dbError } = await supabaseAdmin
-      .from("admins")
-      .insert({
-        user_id: user.user.id,
-        name,
-        role: role || "admin",
-      });
+    const userId = data.user.id;
 
-    if (dbError) {
-      return res.status(400).json({ error: dbError.message });
+    // 2. Insert into correct table
+    if (system === "nasara") {
+      const { error } = await supabaseAdmin
+        .from("admins")
+        .insert({
+          user_id: userId,
+          role: "admin",
+        });
+
+      if (error) return res.status(400).json({ error: error.message });
+    }
+
+    if (system === "coalition") {
+      const { error } = await supabaseAdmin
+        .from("coalition_admins")
+        .insert({
+          user_id: userId,
+          full_name,
+          role: "admin",
+        });
+
+      if (error) return res.status(400).json({ error: error.message });
     }
 
     return res.json({
       success: true,
-      user_id: user.user.id,
+      user_id: userId,
     });
   } catch (err) {
-    console.log("create-admin error:", err);
     return res.status(500).json({ error: "Server error" });
   }
 });
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
-    const { userId } = req.body;
+    const { userId, system } = req.body;
 
-    const { error } = await supabaseAdmin
-      .from("admins")
-      .delete()
-      .eq("id", userId);
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
+    }
 
-    if (error) {
-      return res.status(400).json({
-        error: error.message,
-      });
+    // remove from correct table
+    if (system === "nasara") {
+      const { error } = await supabaseAdmin
+        .from("admins")
+        .delete()
+        .eq("user_id", userId);
+
+      if (error) return res.status(400).json({ error: error.message });
+    }
+
+    if (system === "coalition") {
+      const { error } = await supabaseAdmin
+        .from("coalition_admins")
+        .delete()
+        .eq("user_id", userId);
+
+      if (error) return res.status(400).json({ error: error.message });
     }
 
     return res.json({
       success: true,
     });
   } catch (err) {
-    return res.status(500).json({
-      error: "Server error",
-    });
+    return res.status(500).json({ error: "Server error" });
   }
 });
-
 /* ================= SECURE DELETE ACCOUNT ================= */
 app.post("/delete-account", async (req, res) => {
   try {
