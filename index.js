@@ -69,6 +69,74 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     });
   }
 });
+/* ================= CREATE ADMIN ================= */
+app.post("/create-admin", async (req, res) => {
+  try {
+    const { email, password, name, role } = req.body;
+
+    if (!email || !password || !name) {
+      return res.status(400).json({ error: "Missing fields" });
+    }
+
+    // 1. Create auth user
+    const { data: user, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (authError) {
+      return res.status(400).json({ error: authError.message });
+    }
+
+    // 2. Auto insert into admins table
+    const { error: dbError } = await supabaseAdmin
+      .from("admins")
+      .insert({
+        user_id: user.user.id,
+        name,
+        role: role || "admin",
+      });
+
+    if (dbError) {
+      return res.status(400).json({ error: dbError.message });
+    }
+
+    return res.json({
+      success: true,
+      user_id: user.user.id,
+    });
+  } catch (err) {
+    console.log("create-admin error:", err);
+    return res.status(500).json({ error: "Server error" });
+  }
+});
+/* ================= REMOVE ADMIN ================= */
+app.post("/remove-admin", async (req, res) => {
+  try {
+    const { userId } = req.body;
+
+    const { error } = await supabaseAdmin
+      .from("admins")
+      .delete()
+      .eq("id", userId);
+
+    if (error) {
+      return res.status(400).json({
+        error: error.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+    });
+  } catch (err) {
+    return res.status(500).json({
+      error: "Server error",
+    });
+  }
+});
 
 /* ================= SECURE DELETE ACCOUNT ================= */
 app.post("/delete-account", async (req, res) => {
@@ -183,6 +251,7 @@ app.post("/send-push", async (req, res) => {
     res.status(500).json({ error: "Push failed" });
   }
 });
+
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
 app.get("/", (req, res) => {
   res.send("Nasara upload server running 🚀");
