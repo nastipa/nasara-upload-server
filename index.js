@@ -137,19 +137,11 @@ app.post("/create-constituency-admin", async (req, res) => {
       election_id,
     } = req.body;
 
-    if (
-      !email ||
-      !password ||
-      !constituency ||
-      !constituency_id ||
-      !election_id
-    ) {
-      return res.status(400).json({
-        error: "Missing fields",
-      });
+    if (!email || !password || !constituency_id || !election_id) {
+      return res.status(400).json({ error: "Missing fields" });
     }
 
-    // Create Auth user
+    // 1. create auth user
     const { data, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -158,20 +150,18 @@ app.post("/create-constituency-admin", async (req, res) => {
       });
 
     if (authError) {
-      return res.status(400).json({
-        error: authError.message,
-      });
+      return res.status(400).json({ error: authError.message });
     }
 
     const userId = data.user.id;
 
-    // Insert into constituency_admins
+    // 2. insert constituency admin
     const { error } = await supabaseAdmin
       .from("constituency_admins")
       .insert({
         user_id: userId,
-        email,
         full_name,
+        email,
         constituency,
         constituency_id,
         election_id,
@@ -179,23 +169,16 @@ app.post("/create-constituency-admin", async (req, res) => {
       });
 
     if (error) {
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-
-      return res.status(400).json({
-        error: error.message,
-      });
+      return res.status(400).json({ error: error.message });
     }
 
     return res.json({
       success: true,
       user_id: userId,
     });
-  } catch (err) {
-    console.log(err);
 
-    return res.status(500).json({
-      error: "Server error",
-    });
+  } catch (err) {
+    return res.status(500).json({ error: "Server error" });
   }
 });
 /* ================= REMOVE ADMIN ================= */
@@ -236,46 +219,42 @@ app.post("/remove-admin", async (req, res) => {
 /* ================= REMOVE CONSTITUENCY ADMIN ================= */
 app.post("/remove-constituency-admin", async (req, res) => {
   try {
-    const { user_id } = req.body;
+    const { email } = req.body;
 
-    if (!user_id) {
-      return res.status(400).json({
-        error: "user_id required",
-      });
+    if (!email) {
+      return res.status(400).json({ error: "Email required" });
     }
 
-    // Delete from table
-    const { error } = await supabaseAdmin
+    // 1. find user
+    const { data: users } =
+      await supabaseAdmin.auth.admin.listUsers();
+
+    const user = users.users.find(u => u.email === email);
+
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    const userId = user.id;
+
+    // 2. delete from constituency_admins
+    await supabaseAdmin
       .from("constituency_admins")
       .delete()
-      .eq("user_id", user_id);
+      .eq("user_id", userId);
+
+    // 3. delete auth user
+    const { error } =
+      await supabaseAdmin.auth.admin.deleteUser(userId);
 
     if (error) {
-      return res.status(400).json({
-        error: error.message,
-      });
+      return res.status(500).json({ error: error.message });
     }
 
-    // Delete Auth user
-    const { error: authError } =
-      await supabaseAdmin.auth.admin.deleteUser(user_id);
-
-    if (authError) {
-      return res.status(400).json({
-        error: authError.message,
-      });
-    }
-
-    return res.json({
-      success: true,
-    });
+    return res.json({ success: true });
 
   } catch (err) {
-    console.log(err);
-
-    return res.status(500).json({
-      error: "Server error",
-    });
+    return res.status(500).json({ error: "Server error" });
   }
 });
 /* ================= SECURE DELETE ACCOUNT ================= */
