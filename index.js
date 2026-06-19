@@ -125,6 +125,79 @@ app.post("/create-admin", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+/* ================= CREATE CONSTITUENCY ADMIN ================= */
+app.post("/create-constituency-admin", async (req, res) => {
+  try {
+    const {
+      email,
+      password,
+      full_name,
+      constituency,
+      constituency_id,
+      election_id,
+    } = req.body;
+
+    if (
+      !email ||
+      !password ||
+      !constituency ||
+      !constituency_id ||
+      !election_id
+    ) {
+      return res.status(400).json({
+        error: "Missing fields",
+      });
+    }
+
+    // Create Auth user
+    const { data, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (authError) {
+      return res.status(400).json({
+        error: authError.message,
+      });
+    }
+
+    const userId = data.user.id;
+
+    // Insert into constituency_admins
+    const { error } = await supabaseAdmin
+      .from("constituency_admins")
+      .insert({
+        user_id: userId,
+        email,
+        full_name,
+        constituency,
+        constituency_id,
+        election_id,
+        active: true,
+      });
+
+    if (error) {
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+
+      return res.status(400).json({
+        error: error.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+      user_id: userId,
+    });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      error: "Server error",
+    });
+  }
+});
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
@@ -158,6 +231,51 @@ app.post("/remove-admin", async (req, res) => {
     });
   } catch (err) {
     return res.status(500).json({ error: "Server error" });
+  }
+});
+/* ================= REMOVE CONSTITUENCY ADMIN ================= */
+app.post("/remove-constituency-admin", async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
+        error: "user_id required",
+      });
+    }
+
+    // Delete from table
+    const { error } = await supabaseAdmin
+      .from("constituency_admins")
+      .delete()
+      .eq("user_id", user_id);
+
+    if (error) {
+      return res.status(400).json({
+        error: error.message,
+      });
+    }
+
+    // Delete Auth user
+    const { error: authError } =
+      await supabaseAdmin.auth.admin.deleteUser(user_id);
+
+    if (authError) {
+      return res.status(400).json({
+        error: authError.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+    });
+
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      error: "Server error",
+    });
   }
 });
 /* ================= SECURE DELETE ACCOUNT ================= */
