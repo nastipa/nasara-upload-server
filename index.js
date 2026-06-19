@@ -128,21 +128,37 @@ app.post("/create-admin", async (req, res) => {
 /* ================= CREATE CONSTITUENCY ADMIN ================= */
 app.post("/create-constituency-admin", async (req, res) => {
   try {
-    const {
-      email,
-      password,
-      full_name,
-      constituency,
-      constituency_id,
-      election_id,
-    } = req.body;
+    const { email, password, full_name, constituency } = req.body;
 
-    if (!email || !password || !constituency_id || !election_id) {
+    if (!email || !password || !constituency) {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // 1. create auth user
-    const { data, error: authError } =
+    // 1. get active election
+    const { data: election, error: electionError } = await supabaseAdmin
+      .from("election")
+      .select("id")
+      .eq("status", "active")
+      .single();
+
+    if (electionError || !election) {
+      return res.status(400).json({ error: "No active election" });
+    }
+
+    // 2. find real constituency (IMPORTANT FIX)
+    const { data: constituencyRow, error: constituencyError } =
+      await supabaseAdmin
+        .from("constituencies")
+        .select("id, name")
+        .ilike("name", constituency.trim())
+        .single();
+
+    if (constituencyError || !constituencyRow) {
+      return res.status(400).json({ error: "Constituency not found" });
+    }
+
+    // 3. create auth user
+    const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
         password,
@@ -153,30 +169,31 @@ app.post("/create-constituency-admin", async (req, res) => {
       return res.status(400).json({ error: authError.message });
     }
 
-    const userId = data.user.id;
+    const userId = authData.user.id;
 
-    // 2. insert constituency admin
-    const { error } = await supabaseAdmin
+    // 4. insert into constituency_admins (NO CODE, NO GENERATION)
+    const { error: insertError } = await supabaseAdmin
       .from("constituency_admins")
       .insert({
         user_id: userId,
         full_name,
         email,
-        constituency,
-        constituency_id,
-        election_id,
+        constituency: constituencyRow.name,
+        constituency_id: constituencyRow.id,
+        election_id: election.id,
         active: true,
       });
 
-    if (error) {
-      return res.status(400).json({ error: error.message });
+    if (insertError) {
+      return res.status(400).json({ error: insertError.message });
     }
 
     return res.json({
       success: true,
       user_id: userId,
+      constituency_id: constituencyRow.id,
+      election_id: election.id,
     });
-
   } catch (err) {
     return res.status(500).json({ error: "Server error" });
   }
@@ -219,40 +236,34 @@ app.post("/remove-admin", async (req, res) => {
 /* ================= REMOVE CONSTITUENCY ADMIN ================= */
 app.post("/remove-constituency-admin", async (req, res) => {
   try {
-    const { email } = req.body;
+    const { userId } = req.body;
 
-    if (!email) {
-      return res.status(400).json({ error: "Email required" });
+    if (!userId) {
+      return res.status(400).json({ error: "userId required" });
     }
 
-    // 1. find user
-    const { data: users } =
-      await supabaseAdmin.auth.admin.listUsers();
-
-    const user = users.users.find(u => u.email === email);
-
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    const userId = user.id;
-
-    // 2. delete from constituency_admins
-    await supabaseAdmin
+    // 1. remove from constituency_admins
+    const { error: dbError } = await supabaseAdmin
       .from("constituency_admins")
       .delete()
       .eq("user_id", userId);
 
-    // 3. delete auth user
-    const { error } =
-      await supabaseAdmin.auth.admin.deleteUser(userId);
-
-    if (error) {
-      return res.status(500).json({ error: error.message });
+    if (dbError) {
+      return res.status(400).json({ error: dbError.message });
     }
 
-    return res.json({ success: true });
+    // 2. delete auth user (important cleanup)
+    const { error: authError } =
+      await supabaseAdmin.auth.admin.deleteUser(userId);
 
+    if (authError) {
+      return res.status(400).json({ error: authError.message });
+    }
+
+    return res.json({
+      success: true,
+      message: "Constituency admin removed",
+    });
   } catch (err) {
     return res.status(500).json({ error: "Server error" });
   }
