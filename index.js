@@ -134,7 +134,7 @@ app.post("/create-constituency-admin", async (req, res) => {
       return res.status(400).json({ error: "Missing fields" });
     }
 
-    // 1. get active election
+    // 1. active election
     const { data: election, error: electionError } = await supabaseAdmin
       .from("election")
       .select("id")
@@ -145,19 +145,38 @@ app.post("/create-constituency-admin", async (req, res) => {
       return res.status(400).json({ error: "No active election" });
     }
 
-    // 2. find real constituency (IMPORTANT FIX)
-    const { data: constituencyRow, error: constituencyError } =
-      await supabaseAdmin
-        .from("constituencies")
-        .select("id, name")
-        .ilike("name", constituency.trim())
-        .single();
+    let constituencyRow;
 
-    if (constituencyError || !constituencyRow) {
-      return res.status(400).json({ error: "Constituency not found" });
+    // 2. check if constituency exists
+    const { data: existing } = await supabaseAdmin
+      .from("constituencies")
+      .select("id, name")
+      .ilike("name", constituency.trim())
+      .maybeSingle();
+
+    // 3. IF EXISTS → use it
+    if (existing) {
+      constituencyRow = existing;
+    } 
+    // 4. IF NOT EXISTS → CREATE NEW
+    else {
+      const { data: newConstituency, error: createError } =
+        await supabaseAdmin
+          .from("constituencies")
+          .insert({
+            name: constituency.trim(),
+          })
+          .select("id, name")
+          .single();
+
+      if (createError) {
+        return res.status(400).json({ error: createError.message });
+      }
+
+      constituencyRow = newConstituency;
     }
 
-    // 3. create auth user
+    // 5. create auth user
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -171,7 +190,7 @@ app.post("/create-constituency-admin", async (req, res) => {
 
     const userId = authData.user.id;
 
-    // 4. insert into constituency_admins (NO CODE, NO GENERATION)
+    // 6. insert constituency admin
     const { error: insertError } = await supabaseAdmin
       .from("constituency_admins")
       .insert({
