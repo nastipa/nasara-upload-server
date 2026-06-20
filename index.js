@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const AWS = require("aws-sdk");
+const PDFDocument = require("pdfkit");
 require("dotenv").config();
 
 
@@ -33,7 +34,27 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+/* ================= NOTIFICATION HELPER ================= */
+async function notifyUser(userId, title, body) {
+  const { data } = await supabaseAdmin
+    .from("profiles")
+    .select("push_token")
+    .eq("id", userId)
+    .single();
 
+  if (!data?.push_token) return;
+
+  await fetch("https://exp.host/--/api/v2/push/send", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      to: data.push_token,
+      sound: "default",
+      title,
+      body,
+    }),
+  });
+}
 /* ================= UPLOAD ROUTE ================= */
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
@@ -366,6 +387,68 @@ async function sendPush(
     }
   );
 }
+/* ================= QUOTATION PDF ================= */
+const PDFDocument = require("pdfkit");
+
+app.get("/quotation-pdf/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data } = await supabaseAdmin
+      .from("utility_quotations")
+      .select(", utility_applications()")
+      .eq("id", id)
+      .single();
+
+    if (!data) {
+      return res.status(404).json({ error: "Not found" });
+    }
+
+    const doc = new PDFDocument();
+
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename=quotation-${id}.pdf`
+    );
+
+    doc.pipe(res);
+
+    doc.fontSize(16).text(
+      "NATIONAL ELECTRICITY DISTRIBUTION COMPANY (NEDCo)",
+      { align: "center" }
+    );
+
+    doc.moveDown();
+
+    doc.fontSize(14).text(
+      "QUOTATION FOR ELECTRICITY SUPPLY",
+      { align: "center" }
+    );
+
+    doc.moveDown();
+
+    doc.fontSize(12).text(`Reference ID: ${data.application_id}`);
+    doc.text(`Applicant: ${data.utility_applications.full_name}`);
+    doc.text(`Address: ${data.utility_applications.address}`);
+    doc.text(`Amount: GH₵${data.amount}`);
+
+    doc.moveDown();
+
+    doc.text(data.letter_text || "");
+
+    doc.moveDown(2);
+
+    doc.text("__________");
+    doc.text("NEDCo Utility Administrator");
+
+    doc.end();
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: "PDF generation failed" });
+  }
+});
+
 /* ================= PUSH ROUTE ================= */
 app.post("/send-push", async (req, res) => {
   try {
