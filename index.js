@@ -41,7 +41,6 @@ async function notifyUser(userId, title, body) {
     .select("push_token")
     .eq("id", userId)
     .single();
-
   if (!data?.push_token) return;
 
   await fetch("https://exp.host/--/api/v2/push/send", {
