@@ -117,7 +117,7 @@ app.post("/create-admin", async (req, res) => {
     let userId;
     let existingUser = false;
 
-    /* ================= 1. TRY CREATE USER ================= */
+    /* ================= CREATE USER ================= */
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -129,24 +129,36 @@ app.post("/create-admin", async (req, res) => {
       userId = authData.user.id;
     }
 
-    /* ================= 2. USER ALREADY EXISTS ================= */
+    /* ================= USER EXISTS ================= */
     if (authError) {
       const msg = authError.message?.toLowerCase() || "";
 
       if (msg.includes("already") || msg.includes("exists")) {
         existingUser = true;
 
-        // ✅ BEST METHOD (NO LIST USERS)
         const { data, error } =
-          await supabaseAdmin.auth.admin.getUserByEmail(email);
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
 
-        if (error || !data?.user) {
+        if (error) {
           return res.status(400).json({
-            error: "Existing user not found in Auth",
+            error: error.message,
           });
         }
 
-        userId = data.user.id;
+        const found = data.users.find(
+          (u) => u.email?.toLowerCase() === email.toLowerCase()
+        );
+
+        if (!found) {
+          return res.status(400).json({
+            error: "User exists but cannot be located",
+          });
+        }
+
+        userId = found.id;
       } else {
         return res.status(400).json({
           error: authError.message,
@@ -154,7 +166,13 @@ app.post("/create-admin", async (req, res) => {
       }
     }
 
-    /* ================= 3. CHECK ADMIN EXISTS ================= */
+    if (!userId) {
+      return res.status(400).json({
+        error: "User ID not resolved",
+      });
+    }
+
+    /* ================= CHECK ADMIN ================= */
     const { data: existingAdmin } = await supabaseAdmin
       .from(table)
       .select("user_id")
@@ -167,7 +185,7 @@ app.post("/create-admin", async (req, res) => {
       });
     }
 
-    /* ================= 4. INSERT ADMIN ================= */
+    /* ================= INSERT ================= */
     const { error: insertError } = await supabaseAdmin
       .from(table)
       .insert({
@@ -190,9 +208,11 @@ app.post("/create-admin", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
+    console.error("CREATE ADMIN ERROR:", err);
+
     return res.status(500).json({
-      error: "Server error",
+      error: err?.message || "Server error",
+      details: err,
     });
   }
 });
