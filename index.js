@@ -117,7 +117,7 @@ app.post("/create-admin", async (req, res) => {
     let userId;
     let existingUser = false;
 
-    /* ================= 1. TRY CREATE AUTH USER ================= */
+    /* ================= 1. TRY CREATE USER ================= */
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -129,34 +129,24 @@ app.post("/create-admin", async (req, res) => {
       userId = authData.user.id;
     }
 
-    /* ================= 2. HANDLE EXISTING USER ================= */
+    /* ================= 2. USER ALREADY EXISTS ================= */
     if (authError) {
       const msg = authError.message?.toLowerCase() || "";
 
       if (msg.includes("already") || msg.includes("exists")) {
         existingUser = true;
 
-        // Instead of listUsers(), we use profiles table (BEST FIX)
-        const { data: profile, error: profileError } =
-          await supabaseAdmin
-            .from("profiles")
-            .select("id")
-            .eq("email", email)
-            .maybeSingle();
+        // ✅ BEST METHOD (NO LIST USERS)
+        const { data, error } =
+          await supabaseAdmin.auth.admin.getUserByEmail(email);
 
-        if (profileError) {
+        if (error || !data?.user) {
           return res.status(400).json({
-            error: profileError.message,
+            error: "Existing user not found in Auth",
           });
         }
 
-        if (!profile) {
-          return res.status(400).json({
-            error: "User exists in Auth but no profile found",
-          });
-        }
-
-        userId = profile.id;
+        userId = data.user.id;
       } else {
         return res.status(400).json({
           error: authError.message,
@@ -164,7 +154,7 @@ app.post("/create-admin", async (req, res) => {
       }
     }
 
-    /* ================= 3. CHECK IF ALREADY ADMIN ================= */
+    /* ================= 3. CHECK ADMIN EXISTS ================= */
     const { data: existingAdmin } = await supabaseAdmin
       .from(table)
       .select("user_id")
@@ -192,7 +182,6 @@ app.post("/create-admin", async (req, res) => {
       });
     }
 
-    /* ================= SUCCESS ================= */
     return res.json({
       success: true,
       user_id: userId,
