@@ -100,7 +100,6 @@ app.post("/create-admin", async (req, res) => {
       });
     }
 
-    // Map system to table
     const tables = {
       nasara: "admins",
       coalition: "coalition_admins",
@@ -116,8 +115,9 @@ app.post("/create-admin", async (req, res) => {
     }
 
     let userId;
+    let existingUser = false;
 
-    // Try creating Auth user
+    /* ================= 1. TRY CREATE AUTH USER ================= */
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -127,37 +127,36 @@ app.post("/create-admin", async (req, res) => {
 
     if (authData?.user) {
       userId = authData.user.id;
-    } else {
-      // User already exists
-      if (
-        authError &&
-        authError.message.toLowerCase().includes("already")
-      ) {
-        const {
-          data: { users },
-          error: listError,
-        } = await supabaseAdmin.auth.admin.listUsers();
+    }
 
-        if (listError) {
+    /* ================= 2. HANDLE EXISTING USER ================= */
+    if (authError) {
+      const msg = authError.message?.toLowerCase() || "";
+
+      if (msg.includes("already") || msg.includes("exists")) {
+        existingUser = true;
+
+        // Instead of listUsers(), we use profiles table (BEST FIX)
+        const { data: profile, error: profileError } =
+          await supabaseAdmin
+            .from("profiles")
+            .select("id")
+            .eq("email", email)
+            .maybeSingle();
+
+        if (profileError) {
           return res.status(400).json({
-            error: listError.message,
+            error: profileError.message,
           });
         }
 
-        const existingUser = users.find(
-          (u) =>
-            u.email &&
-            u.email.toLowerCase() ===
-              email.toLowerCase()
-        );
-
-        if (!existingUser) {
+        if (!profile) {
           return res.status(400).json({
-            error: "Existing user not found",
+            error: "User exists in Auth but no profile found",
           });
         }
 
-        userId = existingUser.id;
+        userId = profile.id;
       } else {
         return res.status(400).json({
           error: authError.message,
@@ -165,13 +164,12 @@ app.post("/create-admin", async (req, res) => {
       }
     }
 
-    // Check if already an admin in this system
-    const { data: existingAdmin } =
-      await supabaseAdmin
-        .from(table)
-        .select("user_id")
-        .eq("user_id", userId)
-        .maybeSingle();
+    /* ================= 3. CHECK IF ALREADY ADMIN ================= */
+    const { data: existingAdmin } = await supabaseAdmin
+      .from(table)
+      .select("user_id")
+      .eq("user_id", userId)
+      .maybeSingle();
 
     if (existingAdmin) {
       return res.status(400).json({
@@ -179,23 +177,14 @@ app.post("/create-admin", async (req, res) => {
       });
     }
 
-    // Build insert object
-    let insertData = {
-      user_id: userId,
-      role: "admin",
-    };
-
-    if (
-      table === "coalition_admins" ||
-      table === "utility_admins"
-    ) {
-      insertData.full_name = full_name;
-    }
-
-    const { error: insertError } =
-      await supabaseAdmin
-        .from(table)
-        .insert(insertData);
+    /* ================= 4. INSERT ADMIN ================= */
+    const { error: insertError } = await supabaseAdmin
+      .from(table)
+      .insert({
+        user_id: userId,
+        full_name,
+        role: "admin",
+      });
 
     if (insertError) {
       return res.status(400).json({
@@ -203,14 +192,16 @@ app.post("/create-admin", async (req, res) => {
       });
     }
 
+    /* ================= SUCCESS ================= */
     return res.json({
       success: true,
       user_id: userId,
-      existing_user: !!authError,
+      existing_user: existingUser,
+      system,
     });
+
   } catch (err) {
     console.error(err);
-
     return res.status(500).json({
       error: "Server error",
     });
