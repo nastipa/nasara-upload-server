@@ -139,7 +139,7 @@ app.post("/create-admin", async (req, res) => {
     
     if (system === "utilities") {
   const { error } = await supabaseAdmin
-    .from("utilities_admins")
+    .from("utility_admins")
     .insert({
       user_id: userId,
       full_name,
@@ -282,7 +282,7 @@ app.post("/remove-admin", async (req, res) => {
     }
     if (system === "utilities") {
   const { error } = await supabaseAdmin
-    .from("utilities_admins")
+    .from("utility_admins")
     .delete()
     .eq("user_id", userId);
 
