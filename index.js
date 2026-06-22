@@ -93,72 +93,127 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 app.post("/create-admin", async (req, res) => {
   try {
     const { email, password, full_name, system } = req.body;
-    // system = "nasara" OR "coalition" OR "utilities"
 
-    if (!email || !password) {
-      return res.status(400).json({ error: "Missing fields" });
+    if (!email || !full_name || !system) {
+      return res.status(400).json({
+        error: "Missing required fields",
+      });
     }
 
-    // 1. Create Auth user
-    const { data, error: authError } =
+    // Map system to table
+    const tables = {
+      nasara: "admins",
+      coalition: "coalition_admins",
+      utilities: "utility_admins",
+    };
+
+    const table = tables[system];
+
+    if (!table) {
+      return res.status(400).json({
+        error: "Invalid system",
+      });
+    }
+
+    let userId;
+
+    // Try creating Auth user
+    const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
       });
 
-    if (authError) {
-      return res.status(400).json({ error: authError.message });
-    }
+    if (authData?.user) {
+      userId = authData.user.id;
+    } else {
+      // User already exists
+      if (
+        authError &&
+        authError.message.toLowerCase().includes("already")
+      ) {
+        const {
+          data: { users },
+          error: listError,
+        } = await supabaseAdmin.auth.admin.listUsers();
 
-    const userId = data.user.id;
+        if (listError) {
+          return res.status(400).json({
+            error: listError.message,
+          });
+        }
 
-    // 2. Insert into correct table
-    if (system === "nasara") {
-      const { error } = await supabaseAdmin
-        .from("admins")
-        .insert({
-          user_id: userId,
-          role: "admin",
+        const existingUser = users.find(
+          (u) =>
+            u.email &&
+            u.email.toLowerCase() ===
+              email.toLowerCase()
+        );
+
+        if (!existingUser) {
+          return res.status(400).json({
+            error: "Existing user not found",
+          });
+        }
+
+        userId = existingUser.id;
+      } else {
+        return res.status(400).json({
+          error: authError.message,
         });
-
-      if (error) return res.status(400).json({ error: error.message });
+      }
     }
 
-    if (system === "coalition") {
-      const { error } = await supabaseAdmin
-        .from("coalition_admins")
-        .insert({
-          user_id: userId,
-          full_name,
-          role: "admin",
-        });
+    // Check if already an admin in this system
+    const { data: existingAdmin } =
+      await supabaseAdmin
+        .from(table)
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
 
-      if (error) return res.status(400).json({ error: error.message });
+    if (existingAdmin) {
+      return res.status(400).json({
+        error: "User is already an admin",
+      });
     }
-    
-    if (system === "utilities") {
-  const { error } = await supabaseAdmin
-    .from("utility_admins")
-    .insert({
+
+    // Build insert object
+    let insertData = {
       user_id: userId,
-      full_name,
       role: "admin",
-    });
+    };
 
-  if (error) {
-    return res.status(400).json({
-      error: error.message,
-    });
-  }
-}
+    if (
+      table === "coalition_admins" ||
+      table === "utility_admins"
+    ) {
+      insertData.full_name = full_name;
+    }
+
+    const { error: insertError } =
+      await supabaseAdmin
+        .from(table)
+        .insert(insertData);
+
+    if (insertError) {
+      return res.status(400).json({
+        error: insertError.message,
+      });
+    }
 
     return res.json({
       success: true,
       user_id: userId,
+      existing_user: !!authError,
     });
   } catch (err) {
-    return res.status(500).json({ error: "Server error" });
+    console.error(err);
+
+    return res.status(500).json({
+      error: "Server error",
+    });
   }
 });
 /* ================= CREATE CONSTITUENCY ADMIN ================= */
