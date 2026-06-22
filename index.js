@@ -93,7 +93,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 app.post("/create-admin", async (req, res) => {
   try {
     const { email, password, full_name, system } = req.body;
-    // system = "nasara" OR "coalition"
+    // system = "nasara" OR "coalition" OR "utilities"
 
     if (!email || !password) {
       return res.status(400).json({ error: "Missing fields" });
@@ -136,6 +136,22 @@ app.post("/create-admin", async (req, res) => {
 
       if (error) return res.status(400).json({ error: error.message });
     }
+    
+    if (system === "utilities") {
+  const { error } = await supabaseAdmin
+    .from("utilities_admins")
+    .insert({
+      user_id: userId,
+      full_name,
+      role: "admin",
+    });
+
+  if (error) {
+    return res.status(400).json({
+      error: error.message,
+    });
+  }
+}
 
     return res.json({
       success: true,
@@ -264,6 +280,18 @@ app.post("/remove-admin", async (req, res) => {
 
       if (error) return res.status(400).json({ error: error.message });
     }
+    if (system === "utilities") {
+  const { error } = await supabaseAdmin
+    .from("utilities_admins")
+    .delete()
+    .eq("user_id", userId);
+
+  if (error) {
+    return res.status(400).json({
+      error: error.message,
+    });
+  }
+}
 
     return res.json({
       success: true,
