@@ -321,21 +321,24 @@ app.post("/create-party-user", async (req, res) => {
       party_id,
     } = req.body;
 
-    if (
-      !email ||
-      !full_name ||
-      !role ||
-      !party_id
-    ) {
+    // Basic validation
+    if (!email || !full_name || !role) {
       return res.status(400).json({
         error: "Missing required fields",
+      });
+    }
+
+    // Only Data Entry Officers MUST belong to a party
+    if (role === "data_entry" && !party_id) {
+      return res.status(400).json({
+        error: "Party is required for Data Entry Officers.",
       });
     }
 
     let userId;
     let existingUser = false;
 
-    // Try creating Auth account
+    // Create auth user
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
@@ -347,7 +350,7 @@ app.post("/create-party-user", async (req, res) => {
       userId = authData.user.id;
     }
 
-    // User already exists
+    // Existing auth user
     if (authError) {
       const msg = authError.message?.toLowerCase() || "";
 
@@ -395,25 +398,31 @@ app.post("/create-party-user", async (req, res) => {
       });
     }
 
-    // Check if profile already exists
-    const { data: profile } = await supabaseAdmin
-      .from("users")
-      .select("id")
-      .eq("auth_user_id", userId)
-      .maybeSingle();
+    // Existing profile?
+    const { data: existingProfile } =
+      await supabaseAdmin
+        .from("users")
+        .select("id")
+        .eq("auth_user_id", userId)
+        .maybeSingle();
 
-    if (profile) {
-      // Update existing profile
+    const payload = {
+      auth_user_id: userId,
+      full_name,
+      phone: phone || null,
+      email,
+      role,
+      status,
+      party_id:
+        role === "party_manager"
+          ? null
+          : party_id,
+    };
+
+    if (existingProfile) {
       const { error } = await supabaseAdmin
         .from("users")
-        .update({
-          full_name,
-          phone,
-          role,
-          status,
-          party_id,
-          email,
-        })
+        .update(payload)
         .eq("auth_user_id", userId);
 
       if (error) {
@@ -422,18 +431,9 @@ app.post("/create-party-user", async (req, res) => {
         });
       }
     } else {
-      // Create profile
       const { error } = await supabaseAdmin
         .from("users")
-        .insert({
-          auth_user_id: userId,
-          full_name,
-          phone,
-          email,
-          role,
-          status,
-          party_id,
-        });
+        .insert(payload);
 
       if (error) {
         return res.status(400).json({
