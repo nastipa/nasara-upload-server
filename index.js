@@ -308,6 +308,154 @@ app.post("/create-constituency-admin", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
+/* ================= CREATE PARTY USER ================= */
+app.post("/create-party-user", async (req, res) => {
+  try {
+    const {
+      email,
+      password,
+      full_name,
+      phone,
+      role,
+      status,
+      party_id,
+    } = req.body;
+
+    if (
+      !email ||
+      !full_name ||
+      !role ||
+      !party_id
+    ) {
+      return res.status(400).json({
+        error: "Missing required fields",
+      });
+    }
+
+    let userId;
+    let existingUser = false;
+
+    // Try creating Auth account
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (authData?.user) {
+      userId = authData.user.id;
+    }
+
+    // User already exists
+    if (authError) {
+      const msg = authError.message?.toLowerCase() || "";
+
+      if (
+        msg.includes("already") ||
+        msg.includes("exists")
+      ) {
+        existingUser = true;
+
+        const { data, error } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
+
+        if (error) {
+          return res.status(400).json({
+            error: error.message,
+          });
+        }
+
+        const found = data.users.find(
+          (u) =>
+            u.email?.toLowerCase() ===
+            email.toLowerCase()
+        );
+
+        if (!found) {
+          return res.status(400).json({
+            error: "Existing user not found",
+          });
+        }
+
+        userId = found.id;
+      } else {
+        return res.status(400).json({
+          error: authError.message,
+        });
+      }
+    }
+
+    if (!userId) {
+      return res.status(400).json({
+        error: "Unable to resolve user.",
+      });
+    }
+
+    // Check if profile already exists
+    const { data: profile } = await supabaseAdmin
+      .from("users")
+      .select("id")
+      .eq("auth_user_id", userId)
+      .maybeSingle();
+
+    if (profile) {
+      // Update existing profile
+      const { error } = await supabaseAdmin
+        .from("users")
+        .update({
+          full_name,
+          phone,
+          role,
+          status,
+          party_id,
+          email,
+        })
+        .eq("auth_user_id", userId);
+
+      if (error) {
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+    } else {
+      // Create profile
+      const { error } = await supabaseAdmin
+        .from("users")
+        .insert({
+          auth_user_id: userId,
+          full_name,
+          phone,
+          email,
+          role,
+          status,
+          party_id,
+        });
+
+      if (error) {
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+    }
+
+    return res.json({
+      success: true,
+      existing_user: existingUser,
+      user_id: userId,
+    });
+
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      error: err.message,
+    });
+  }
+});
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
