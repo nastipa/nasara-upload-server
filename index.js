@@ -544,34 +544,56 @@ app.post("/delete-account", async (req, res) => {
     const token = req.headers.authorization?.replace("Bearer ", "");
 
     if (!token) {
-      return res.status(401).json({ error: "No token provided" });
-    }
-
-    const { data, error: userError } =
-      await supabaseAdmin.auth.getUser(token);
-
-    if (userError || !data?.user) {
-      return res.status(401).json({ error: "Invalid token" });
-    }
-
-    const user_id = data.user.id;
-
-    const { error } =
-      await supabaseAdmin.auth.admin.deleteUser(user_id);
-
-    if (error) {
-      console.log("DELETE ERROR:", error);
-      return res.status(500).json({
-        error: error.message,
+      return res.status(401).json({
+        error: "No token provided",
       });
     }
 
-    return res.json({ success: true });
+    const { data, error } =
+      await supabaseAdmin.auth.getUser(token);
+
+    if (error || !data?.user) {
+      return res.status(401).json({
+        error: "Invalid token",
+      });
+    }
+
+    const userId = data.user.id;
+
+    // Clean up everything owned by the user
+    const { error: rpcError } =
+      await supabaseAdmin.rpc(
+        "delete_user_everything",
+        {
+          p_user_id: userId,
+        }
+      );
+
+    if (rpcError) {
+      return res.status(500).json({
+        error: rpcError.message,
+      });
+    }
+
+    // Delete Auth user last
+    const { error: authError } =
+      await supabaseAdmin.auth.admin.deleteUser(userId);
+
+    if (authError) {
+      return res.status(500).json({
+        error: authError.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+    });
 
   } catch (err) {
-    console.log("Delete error:", err);
+    console.log(err);
+
     return res.status(500).json({
-      error: "Delete failed",
+      error: err.message,
     });
   }
 });
