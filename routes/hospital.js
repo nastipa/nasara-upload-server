@@ -1,4 +1,5 @@
 const express = require("express");
+const crypto = require("crypto");
 const { createClient } = require("@supabase/supabase-js");
 const notifyUser = require("../services/notifyUser");
 const fetch = require("node-fetch");
@@ -237,14 +238,13 @@ const patient_id = req.user.id;
     const queueNumber =
       `${prefix}-${String(queuePosition).padStart(3, "0")}`;
 
-    // Booking code
-    const bookingCode =
-      "NHS-" +
-      Math.random()
-        .toString(36)
-        .substring(2, 8)
-        .toUpperCase();
-
+    // Secure booking code
+const bookingCode =
+  "NHS-" +
+  crypto
+    .randomBytes(3)
+    .toString("hex")
+    .toUpperCase();
     // Estimated wait
     const estimatedWait =
       queuePosition *
