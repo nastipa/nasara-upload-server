@@ -4,10 +4,11 @@ const cors = require("cors");
 const AWS = require("aws-sdk");
 const PDFDocument = require("pdfkit");
 require("dotenv").config();
-
+const hospitalRoutes = require("./routes/hospital");
 
 const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
+const notifyUser = require("./services/notifyUser");
 
 
 const app = express();
@@ -34,26 +35,7 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
-/* ================= NOTIFICATION HELPER ================= */
-async function notifyUser(userId, title, body) {
-  const { data } = await supabaseAdmin
-    .from("profiles")
-    .select("push_token")
-    .eq("id", userId)
-    .single();
-  if (!data?.push_token) return;
 
-  await fetch("https://exp.host/--/api/v2/push/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      to: data.push_token,
-      sound: "default",
-      title,
-      body,
-    }),
-  });
-}
 /* ================= UPLOAD ROUTE ================= */
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
@@ -735,6 +717,8 @@ app.post("/send-push", async (req, res) => {
     res.status(500).json({ error: "Push failed" });
   }
 });
+/* ================= HOSPITAL ROUTES ================= */
+app.use("/hospital", hospitalRoutes);
 
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
 app.get("/", (req, res) => {
