@@ -127,48 +127,7 @@ router.get("/list", async (req, res) => {
   }
 });
 
-/* =========================================================
-   GET SINGLE HOSPITAL
-========================================================= */
 
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: hospital, error } = await supabaseAdmin
-      .from("hospitals")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (error) {
-      return res.status(404).json({
-        success: false,
-        error: error.message,
-      });
-    }
-
-    const { data: departments } = await supabaseAdmin
-      .from("hospital_departments")
-      .select("*")
-      .eq("hospital_id", id)
-      .eq("is_active", true)
-      .order("name");
-
-    return res.json({
-      success: true,
-      hospital,
-      departments: departments || [],
-    });
-  } catch (err) {
-    console.log(err);
-
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
-});
 
 
 /* =========================================================
@@ -476,6 +435,50 @@ router.get(
     });
   }
 });
+/* =========================================================
+   GET SINGLE HOSPITAL
+========================================================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: hospital, error } = await supabaseAdmin
+      .from("hospitals")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    const { data: departments } = await supabaseAdmin
+      .from("hospital_departments")
+      .select("*")
+      .eq("hospital_id", id)
+      .eq("is_active", true)
+      .order("name");
+
+    return res.json({
+      success: true,
+      hospital,
+      departments: departments || [],
+    });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+
 /* =========================================================
    UPDATE BOOKING STATUS
 ========================================================= */
