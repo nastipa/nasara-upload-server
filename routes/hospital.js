@@ -1074,12 +1074,13 @@ hospitalAdminAuth, async (req, res) => {
       });
     }
 
-    await notifyUser(
-      booking.patient_id,
-      "Checked In",
-      "You have successfully checked in. Please wait to be called."
-    );
-
+    notifyUser(
+  booking.patient_id,
+  "Checked In",
+  "You have successfully checked in. Please wait to be called."
+).catch(err =>
+ console.log("Notification failed:", err)
+);
     return res.json({
       success: true,
       booking: data,
