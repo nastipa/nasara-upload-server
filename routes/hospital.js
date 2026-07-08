@@ -1073,5 +1073,212 @@ hospitalAdminAuth, async (req, res) => {
     });
   }
 });
+/* =========================================================
+   CREATE HOSPITAL ADMIN
+========================================================= */
+
+router.post(
+  "/create-hospital-admin",
+  authenticate,
+  async (req, res) => {
+    try {
+
+      const {
+        email,
+        password,
+        full_name,
+        hospital_id,
+        role,
+      } = req.body;
+
+
+      if (
+        !email ||
+        !full_name ||
+        !hospital_id
+      ) {
+        return res.status(400).json({
+          error: "Missing required fields",
+        });
+      }
+
+
+      let userId;
+      let existingUser = false;
+
+
+      // CREATE AUTH USER
+
+      const {
+        data: authData,
+        error: authError,
+      } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+
+      if (authData?.user) {
+        userId = authData.user.id;
+      }
+
+
+
+      // EXISTING NASARA USER
+
+      if (authError) {
+
+        const msg =
+          authError.message?.toLowerCase() || "";
+
+
+        if (
+          msg.includes("already") ||
+          msg.includes("exists")
+        ) {
+
+          existingUser = true;
+
+
+          const {
+            data,
+            error,
+          } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page:1,
+            perPage:1000,
+          });
+
+
+          if(error){
+            return res.status(400).json({
+              error:error.message
+            });
+          }
+
+
+          const found =
+          data.users.find(
+            u =>
+            u.email?.toLowerCase()
+            === email.toLowerCase()
+          );
+
+
+          if(!found){
+
+            return res.status(400).json({
+              error:"Existing user not found"
+            });
+
+          }
+
+
+          userId = found.id;
+
+
+        } else {
+
+          return res.status(400).json({
+            error:authError.message
+          });
+
+        }
+      }
+
+
+
+      if(!userId){
+
+        return res.status(400).json({
+          error:"Unable to find user"
+        });
+
+      }
+
+
+
+      // CHECK IF ALREADY ADMIN
+
+      const {
+        data: existingAdmin
+      } =
+      await supabaseAdmin
+      .from("hospital_admins")
+      .select("id")
+      .eq("user_id",userId)
+      .maybeSingle();
+
+
+
+      if(existingAdmin){
+
+        return res.status(400).json({
+          error:"User already hospital admin"
+        });
+
+      }
+
+
+
+      // INSERT ADMIN
+
+      const {
+        error:insertError
+      } =
+      await supabaseAdmin
+      .from("hospital_admins")
+      .insert({
+
+        user_id:userId,
+
+        hospital_id,
+
+        full_name,
+
+        role:
+        role || "admin",
+
+        status:"approved"
+
+      });
+
+
+
+      if(insertError){
+
+        return res.status(400).json({
+          error:insertError.message
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        existing_user:existingUser,
+
+        user_id:userId
+
+      });
+
+
+
+    } catch(err){
+
+      console.log(err);
+
+      return res.status(500).json({
+        error:err.message
+      });
+
+    }
+  }
+);
 
 module.exports = router;
