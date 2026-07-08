@@ -1076,6 +1076,67 @@ hospitalAdminAuth, async (req, res) => {
   }
 });
 /* =========================================================
+   GET TODAY'S CHECKED-IN PATIENTS
+========================================================= */
+
+router.get(
+  "/checkin-list",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const today = new Date()
+        .toISOString()
+        .split("T")[0];
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_bookings")
+          .select(`
+            id,
+            queue_number,
+            booking_code,
+            status,
+            condition,
+            checked_in,
+            hospital_departments(
+              id,
+              name
+            )
+          `)
+          .eq("hospital_id", hospitalId)
+          .eq("booking_date", today)
+          .eq("status", "checked_in")
+          .order("created_at", {
+            ascending: true,
+          });
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        patients: data || [],
+      });
+
+    } catch (err) {
+      console.log(err);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+/* =========================================================
    CREATE HOSPITAL ADMIN
 ========================================================= */
 
