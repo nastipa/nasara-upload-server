@@ -801,47 +801,66 @@ router.post(
   }
 );
 /* =========================================================
-   GET SINGLE HOSPITAL
+   GET TODAY'S CHECKED-IN PATIENTS
 ========================================================= */
 
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
+router.get(
+  "/checkin-list",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
 
-    const { data: hospital, error } = await supabaseAdmin
-      .from("hospitals")
-      .select("*")
-      .eq("id", id)
-      .single();
+      const today = new Date()
+        .toISOString()
+        .split("T")[0];
 
-    if (error) {
-      return res.status(404).json({
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_bookings")
+          .select(`
+            id,
+            queue_number,
+            booking_code,
+            status,
+            condition,
+            checked_in,
+            hospital_departments(
+              id,
+              name
+            )
+          `)
+          .eq("hospital_id", hospitalId)
+          .eq("booking_date", today)
+          .eq("status", "checked_in")
+          .order("created_at", {
+            ascending: true,
+          });
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        patients: data || [],
+      });
+
+    } catch (err) {
+      console.log(err);
+
+      return res.status(500).json({
         success: false,
-        error: error.message,
+        error: err.message,
       });
     }
-
-    const { data: departments } = await supabaseAdmin
-      .from("hospital_departments")
-      .select("*")
-      .eq("hospital_id", id)
-      .eq("is_active", true)
-      .order("name");
-
-    return res.json({
-      success: true,
-      hospital,
-      departments: departments || [],
-    });
-  } catch (err) {
-    console.log(err);
-
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
   }
-});
+);
 
 
 /* =========================================================
@@ -1075,67 +1094,7 @@ hospitalAdminAuth, async (req, res) => {
     });
   }
 });
-/* =========================================================
-   GET TODAY'S CHECKED-IN PATIENTS
-========================================================= */
 
-router.get(
-  "/checkin-list",
-  authenticate,
-  hospitalAdminAuth,
-  async (req, res) => {
-    try {
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
-
-      const today = new Date()
-        .toISOString()
-        .split("T")[0];
-
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select(`
-            id,
-            queue_number,
-            booking_code,
-            status,
-            condition,
-            checked_in,
-            hospital_departments(
-              id,
-              name
-            )
-          `)
-          .eq("hospital_id", hospitalId)
-          .eq("booking_date", today)
-          .eq("status", "checked_in")
-          .order("created_at", {
-            ascending: true,
-          });
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
-      }
-
-      return res.json({
-        success: true,
-        patients: data || [],
-      });
-
-    } catch (err) {
-      console.log(err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-  }
-);
 /* =========================================================
    CREATE HOSPITAL ADMIN
 ========================================================= */
@@ -1343,5 +1302,48 @@ router.post(
     }
   }
 );
+/* =========================================================
+   GET SINGLE HOSPITAL
+========================================================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: hospital, error } = await supabaseAdmin
+      .from("hospitals")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    const { data: departments } = await supabaseAdmin
+      .from("hospital_departments")
+      .select("*")
+      .eq("hospital_id", id)
+      .eq("is_active", true)
+      .order("name");
+
+    return res.json({
+      success: true,
+      hospital,
+      departments: departments || [],
+    });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
 
 module.exports = router;
