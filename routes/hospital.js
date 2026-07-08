@@ -264,19 +264,21 @@ router.get("/my-queue", authenticate, async (req, res) => {
     const { data, error } = await supabaseAdmin
       .from("hospital_bookings")
       .select(`
-        *,
-        hospitals(
-          id,
-          name,
-          town,
-          region,
-          phone
-        ),
-        hospital_departments(
-          id,
-          name
-        )
-      `)
+ *,
+ hospitals (
+   id,
+   name,
+   city,
+   district,
+   region,
+   phone,
+   address
+ ),
+ hospital_departments (
+   id,
+   name
+ )
+`)
       .eq("patient_id", patientId)
       .eq("booking_date", today)
       .neq("status", "completed")
