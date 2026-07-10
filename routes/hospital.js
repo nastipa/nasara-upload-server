@@ -401,22 +401,29 @@ const bookingCode =
 let insertError;
 
 for(let attempt = 0; attempt < 3; attempt++){
-
+const prioritySuggestion =
+suggestPriority(condition);
 const { data, error } =
 await supabaseAdmin
 .from("hospital_bookings")
 .insert({
-  hospital_id,
-  patient_id,
-  department_id,
-  booking_date: bookingDate,
-  condition,
-  queue_number: queueNumber,
-  booking_code: bookingCode,
-  qr_code: bookingCode,
-  estimated_wait_minutes:
-    estimatedWait,
-  status:"waiting",
+ hospital_id,
+ patient_id,
+ department_id,
+ booking_date: bookingDate,
+ condition,
+
+ priority:
+ prioritySuggestion.priority,
+
+ priority_level:
+ prioritySuggestion.level,
+
+ queue_number: queueNumber,
+ booking_code: bookingCode,
+ qr_code: bookingCode,
+ estimated_wait_minutes: estimatedWait,
+ status:"waiting",
 })
 .select()
 .single();
@@ -629,13 +636,21 @@ router.get(
 
       // Find patient's active booking
       const { data: booking, error: bookingError } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select("*")
-          .eq("patient_id", patientId)
-          .eq("booking_date", today)
-          .neq("status", "completed")
-          .maybeSingle();
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("*")
+    .eq("patient_id", patientId)
+    .eq("booking_date", today)
+    .in("status", [
+      "waiting",
+      "checked_in",
+      "called",
+    ])
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(1)
+    .maybeSingle();
 
       if (bookingError) {
         return res.status(400).json({
@@ -650,6 +665,18 @@ router.get(
           queue: null,
         });
       }
+      const {data:hospital}=await supabaseAdmin
+.from("hospitals")
+.select("name")
+.eq("id",booking.hospital_id)
+.single();
+
+
+const {data:department}=await supabaseAdmin
+.from("hospital_departments")
+.select("name")
+.eq("id",booking.department_id)
+.single();
 
       // Current serving
       const { data: currentServing } =
@@ -702,28 +729,41 @@ router.get(
           ]);
 
       return res.json({
-        success: true,
-        queue: {
+  success: true,
 
-          current_serving:
-            currentServing?.queue_number || null,
+  queue: {
 
-          next_numbers:
-            (nextPatients || []).map(
-              item => item.queue_number
-            ),
+    hospital:
+      hospital?.name || "",
 
-          total_waiting:
-            waitingCount || 0,
+    department:
+      department?.name || "",
 
-          your_number:
-            booking.queue_number,
+    current_serving:
+      currentServing?.queue_number || null,
 
-          your_status:
-            booking.status,
+    next_numbers:
+      (nextPatients || []).map(
+        item => item.queue_number
+      ),
 
-        },
-      });
+    total_waiting:
+      waitingCount || 0,
+
+    your_number:
+      booking.queue_number,
+
+    people_ahead:
+      0,
+
+    estimated_wait_minutes:
+      0,
+
+    your_status:
+      booking.status,
+
+  },
+});
 
     } catch (err) {
 
@@ -2244,14 +2284,6 @@ if (!superAdmin) {
  "Only Nasara super admin can create hospital administrators."
  });
 }
-const { data: hospital } =
-await supabaseAdmin
-.from("hospitals")
-.select("id")
-.eq("id", hospital_id)
-.maybeSingle();
-
-
       const {
         email,
         password,
@@ -2259,6 +2291,12 @@ await supabaseAdmin
         hospital_id,
         role,
       } = req.body;
+      const { data: hospital } =
+await supabaseAdmin
+.from("hospitals")
+.select("id")
+.eq("id", hospital_id)
+.maybeSingle();
 
 
       if (
