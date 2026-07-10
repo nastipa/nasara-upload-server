@@ -163,6 +163,15 @@ async function notifyNextPatients(
       err.message
     )
   );
+  await supabaseAdmin
+  .from("hospital_notifications")
+  .insert({
+    hospital_id: hospitalId,
+    patient_id: patient.patient_id,
+    booking_id: patient.id,
+    title,
+    message: body,
+  });
 
 
   await supabaseAdmin
@@ -1759,10 +1768,20 @@ const { data, error } =
       }
 
       await notifyUser(
-        data.patient_id,
-        title,
-        body
-      );
+  data.patient_id,
+  title,
+  body
+);
+
+await supabaseAdmin
+  .from("hospital_notifications")
+  .insert({
+    hospital_id: booking.hospital_id,
+    patient_id: booking.patient_id,
+    booking_id: booking.id,
+    title,
+    message: body,
+  });
     }
     /* =========================================================
    NOTIFY NEXT PATIENTS
@@ -2284,6 +2303,102 @@ router.get("/:id", async (req, res) => {
     });
   }
 });
+/* =========================================================
+   GET HOSPITAL NOTIFICATIONS
+========================================================= */
 
+router.get(
+  "/notifications",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_notifications")
+          .select(`
+            *,
+            hospital_bookings(
+              queue_number
+            )
+          `)
+          .eq("hospital_id", hospitalId)
+          .order("created_at", {
+            ascending: false,
+          });
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        notifications: data || [],
+      });
+
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+/* =========================================================
+   MARK NOTIFICATION READ
+========================================================= */
+
+router.post(
+  "/notification-read",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+
+      const { notification_id } = req.body;
+
+      if (!notification_id) {
+        return res.status(400).json({
+          success: false,
+          error: "notification_id is required",
+        });
+      }
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_notifications")
+          .update({
+            is_read: true,
+          })
+          .eq("id", notification_id)
+          .select()
+          .single();
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        notification: data,
+      });
+
+    } catch (err) {
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
 
 module.exports = router;
