@@ -351,21 +351,46 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
     if (isHospitalAdmin) {
 
-      // Hospital admin creates queue for patient
-      hospital_id = admin.hospital_id;
-
-      queuePatientId = patient_id;
+  hospital_id = admin.hospital_id;
 
 
-    } else {
+  if (!patient_record_id) {
+    return res.status(400).json({
+      success:false,
+      error:"patient_record_id is required for hospital admin booking"
+    });
+  }
 
-      // Patient joins own queue
-      hospital_id = bodyHospitalId;
 
-      queuePatientId = req.user.id;
+  // Get patient auth user from patient_records
 
-    }
+  const { data: patientRecord, error } =
+    await supabaseAdmin
+      .from("patient_records")
+      .select("id,user_id")
+      .eq("id", patient_record_id)
+      .single();
 
+
+  if(error || !patientRecord){
+    return res.status(404).json({
+      success:false,
+      error:"Patient record not found"
+    });
+  }
+
+
+  queuePatientId = patientRecord.user_id;
+
+
+} else {
+
+
+  hospital_id = bodyHospitalId;
+
+  queuePatientId = req.user.id;
+
+}
 
     if (
       !hospital_id ||
@@ -448,7 +473,8 @@ await supabaseAdmin
 .insert({
  hospital_id,
  patient_id: queuePatientId,
- patient_record_id,
+ patient_record_id:
+  patient_record_id || null,
  department_id,
  booking_date: bookingDate,
  condition,
