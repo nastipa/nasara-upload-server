@@ -325,7 +325,6 @@ router.post("/join-queue", authenticate, async (req, res) => {
   try {
    const {
   hospital_id,
-  department_id,
   patient_id,
   patient_record_id,
   condition,
@@ -340,42 +339,47 @@ await supabaseAdmin
 .maybeSingle();
 
 const isHospitalAdmin = !!admin;
+
 const queuePatientId =
   isHospitalAdmin
     ? patient_id
     : req.user.id;
 
-    if (
-      !hospital_id ||
-      !queuePatientId ||
-      !department_id
-    ) {
-      return res.status(400).json({
-        success: false,
-        error: "Missing required fields",
-      });
-    }
+if (
+  !hospital_id ||
+  !queuePatientId
+) {
+  return res.status(400).json({
+    success: false,
+    error: "Missing required fields",
+  });
+}
 
     // Today's date
     const bookingDate = new Date()
       .toISOString()
       .split("T")[0];
 
-    // Department
-    const { data: department, error: depError } =
-      await supabaseAdmin
-        .from("hospital_departments")
-        .select("*")
-        .eq("id", department_id)
-        .single();
+    // Automatically use OPD department
+const {
+  data: department,
+  error: depError,
+} = await supabaseAdmin
+  .from("hospital_departments")
+  .select("*")
+  .eq("hospital_id", hospital_id)
+  .ilike("name", "OPD")
+  .eq("is_active", true)
+  .maybeSingle();
 
-    if (depError || !department) {
-      return res.status(400).json({
-        success: false,
-        error: "Department not found",
-      });
-    }
+if (depError || !department) {
+  return res.status(400).json({
+    success: false,
+    error: "OPD department has not been created for this hospital.",
+  });
+}
 
+const department_id = department.id;
     // Count today's bookings for this department
     const { count } = await supabaseAdmin
       .from("hospital_bookings")
