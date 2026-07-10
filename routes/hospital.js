@@ -194,6 +194,93 @@ async function notifyNextPatients(
 
   }
 }
+function suggestPriority(condition) {
+
+  if (!condition) {
+    return {
+      priority: "normal",
+      level: 3,
+    };
+  }
+
+
+  const text =
+    condition.toLowerCase();
+
+
+  const emergencyWords = [
+    "chest pain",
+    "difficulty breathing",
+    "unconscious",
+    "severe bleeding",
+    "stroke",
+    "heart attack",
+    "convulsion",
+    "accident",
+    "critical",
+  ];
+
+
+  const urgentWords = [
+    "pregnancy pain",
+    "high fever",
+    "severe pain",
+    "vomiting",
+    "infection",
+    "dehydration",
+  ];
+
+
+  const lowWords = [
+    "checkup",
+    "routine",
+    "follow up",
+    "minor",
+  ];
+
+
+  if (
+    emergencyWords.some(
+      word => text.includes(word)
+    )
+  ) {
+    return {
+      priority:"emergency",
+      level:1,
+    };
+  }
+
+
+  if (
+    urgentWords.some(
+      word => text.includes(word)
+    )
+  ) {
+    return {
+      priority:"urgent",
+      level:2,
+    };
+  }
+
+
+  if (
+    lowWords.some(
+      word => text.includes(word)
+    )
+  ) {
+    return {
+      priority:"low",
+      level:4,
+    };
+  }
+
+
+  return {
+    priority:"normal",
+    level:3,
+  };
+
+}
 /* =========================================================
    GET ALL ACTIVE HOSPITALS
 ========================================================= */
@@ -1982,6 +2069,50 @@ router.post(
       return res.status(500).json({
         success:false,
         error:err.message,
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   SUGGEST PATIENT TRIAGE PRIORITY
+========================================================= */
+
+router.post(
+  "/suggest-priority",
+  authenticate,
+  hospitalAdminAuth,
+  async(req,res)=>{
+
+    try{
+
+      const {
+        condition
+      } = req.body;
+
+
+      const suggestion =
+        suggestPriority(condition);
+
+
+      return res.json({
+
+        success:true,
+
+        suggestion
+
+      });
+
+
+    }catch(err){
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message
+
       });
 
     }
