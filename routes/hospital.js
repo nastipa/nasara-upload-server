@@ -310,35 +310,67 @@ const bookingCode =
       (department.average_minutes || 10);
 
     // Insert booking
-    const { data, error } =
-      await supabaseAdmin
-        .from("hospital_bookings")
-        .insert({
-          hospital_id,
-          patient_id,
-          department_id,
-          booking_date: bookingDate,
-          condition,
-          queue_number: queueNumber,
-          booking_code: bookingCode,
-          qr_code: bookingCode,
-          estimated_wait_minutes:
-            estimatedWait,
-          status: "waiting",
-        })
-        .select()
-        .single();
+    let booking;
+let insertError;
 
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        error: error.message,
-      });
-    }
+for(let attempt = 0; attempt < 3; attempt++){
+
+const { data, error } =
+await supabaseAdmin
+.from("hospital_bookings")
+.insert({
+  hospital_id,
+  patient_id,
+  department_id,
+  booking_date: bookingDate,
+  condition,
+  queue_number: queueNumber,
+  booking_code: bookingCode,
+  qr_code: bookingCode,
+  estimated_wait_minutes:
+    estimatedWait,
+  status:"waiting",
+})
+.select()
+.single();
+
+
+if(!error){
+ booking = data;
+ break;
+}
+
+if(
+ error.message.includes("unique")
+){
+ continue;
+}
+
+
+insertError = error;
+
+}
+if(!booking){
+ return res.status(400).json({
+ success:false,
+ error:insertError.message
+ });
+}
+        await supabaseAdmin
+.from("hospital_notifications")
+.insert({
+  hospital_id,
+  patient_id,
+  booking_id: booking.id,
+  title: "Queue Joined",
+  message:
+    `You have joined the queue. Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`,
+});
+
 
     return res.json({
       success: true,
-      booking: data,
+      booking: booking,
     });
 
   } catch (err) {
@@ -1881,13 +1913,23 @@ hospitalAdminAuth, async (req, res) => {
       });
     }
 
-    notifyUser(
+    await notifyUser(
   booking.patient_id,
   "Checked In",
   "You have successfully checked in. Please wait to be called."
-).catch(err =>
- console.log("Notification failed:", err)
 );
+
+
+await supabaseAdmin
+.from("hospital_notifications")
+.insert({
+  hospital_id: booking.hospital_id,
+  patient_id: booking.patient_id,
+  booking_id: booking.id,
+  title:"Checked In",
+  message:
+  "You have successfully checked in. Please wait to be called."
+});
     return res.json({
       success: true,
       booking: data,
@@ -1912,6 +1954,32 @@ router.post(
   authenticate,
   async (req, res) => {
     try {
+      const adminUserId = req.user.id;
+
+
+// CHECK SUPER ADMIN PERMISSION
+
+const { data: superAdmin } =
+  await supabaseAdmin
+    .from("nasara_admins")
+    .select("id")
+    .eq("user_id", adminUserId)
+    .maybeSingle();
+   
+if (!superAdmin) {
+ return res.status(403).json({
+ success:false,
+ error:
+ "Only Nasara super admin can create hospital administrators."
+ });
+}
+const { data: hospital } =
+await supabaseAdmin
+.from("hospitals")
+.select("id")
+.eq("id", hospital_id)
+.maybeSingle();
+
 
       const {
         email,
@@ -1931,6 +1999,12 @@ router.post(
           error: "Missing required fields",
         });
       }
+     if(!hospital){
+ return res.status(404).json({
+  success:false,
+  error:"Hospital not found"
+ });
+}
 
 
       let userId;
@@ -2261,48 +2335,7 @@ router.get(
   }
 );
 
-/* =========================================================
-   GET SINGLE HOSPITAL
-========================================================= */
 
-router.get("/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    const { data: hospital, error } = await supabaseAdmin
-      .from("hospitals")
-      .select("*")
-      .eq("id", id)
-      .single();
-
-    if (error) {
-      return res.status(404).json({
-        success: false,
-        error: error.message,
-      });
-    }
-
-    const { data: departments } = await supabaseAdmin
-      .from("hospital_departments")
-      .select("*")
-      .eq("hospital_id", id)
-      .eq("is_active", true)
-      .order("name");
-
-    return res.json({
-      success: true,
-      hospital,
-      departments: departments || [],
-    });
-  } catch (err) {
-    console.log(err);
-
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
-});
 /* =========================================================
    GET HOSPITAL NOTIFICATIONS
 ========================================================= */
@@ -2400,5 +2433,113 @@ router.post(
     }
   }
 );
+/* =========================================================
+   GET PATIENT HOSPITAL NOTIFICATIONS
+========================================================= */
+
+router.get(
+"/patient-notifications",
+authenticate,
+async(req,res)=>{
+
+try{
+
+const patientId = req.user.id;
+
+
+const {data,error}=await supabaseAdmin
+.from("hospital_notifications")
+.select(`
+ *,
+ hospital_bookings(
+   queue_number
+ )
+`)
+.eq(
+"patient_id",
+patientId
+)
+.order(
+"created_at",
+{
+ ascending:false
+}
+);
+
+
+if(error){
+
+return res.status(400).json({
+success:false,
+error:error.message
+});
+
+}
+
+
+return res.json({
+
+success:true,
+
+notifications:data || []
+
+});
+
+
+}catch(err){
+
+return res.status(500).json({
+
+success:false,
+
+error:err.message
+
+});
+
+}
+
+});
+/* =========================================================
+   GET SINGLE HOSPITAL
+========================================================= */
+
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const { data: hospital, error } = await supabaseAdmin
+      .from("hospitals")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (error) {
+      return res.status(404).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    const { data: departments } = await supabaseAdmin
+      .from("hospital_departments")
+      .select("*")
+      .eq("hospital_id", id)
+      .eq("is_active", true)
+      .order("name");
+
+    return res.json({
+      success: true,
+      hospital,
+      departments: departments || [],
+    });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
 
 module.exports = router;
