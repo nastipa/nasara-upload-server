@@ -323,38 +323,59 @@ router.get("/list", async (req, res) => {
 
 router.post("/join-queue", authenticate, async (req, res) => {
   try {
-   const {
-  hospital_id,
-  patient_id,
-  patient_record_id,
-  condition,
-} = req.body;
 
-const { data: admin } =
-await supabaseAdmin
-.from("hospital_admins")
-.select("id")
-.eq("user_id", req.user.id)
-.eq("status", "approved")
-.maybeSingle();
+    const {
+      patient_id,
+      patient_record_id,
+      condition,
+      hospital_id: bodyHospitalId,
+    } = req.body;
 
-const isHospitalAdmin = !!admin;
 
-const queuePatientId =
-  isHospitalAdmin
-    ? patient_id
-    : req.user.id;
+    // Check if user is hospital admin
+    const { data: admin } =
+      await supabaseAdmin
+        .from("hospital_admins")
+        .select("hospital_id")
+        .eq("user_id", req.user.id)
+        .eq("status", "approved")
+        .maybeSingle();
 
-if (
-  !hospital_id ||
-  !queuePatientId
-) {
-  return res.status(400).json({
-    success: false,
-    error: "Missing required fields",
-  });
-}
 
+    const isHospitalAdmin = !!admin;
+
+
+    let hospital_id;
+    let queuePatientId;
+
+
+    if (isHospitalAdmin) {
+
+      // Hospital admin creates queue for patient
+      hospital_id = admin.hospital_id;
+
+      queuePatientId = patient_id;
+
+
+    } else {
+
+      // Patient joins own queue
+      hospital_id = bodyHospitalId;
+
+      queuePatientId = req.user.id;
+
+    }
+
+
+    if (
+      !hospital_id ||
+      !queuePatientId
+    ) {
+      return res.status(400).json({
+        success:false,
+        error:"Missing required fields",
+      });
+    }
     // Today's date
     const bookingDate = new Date()
       .toISOString()
