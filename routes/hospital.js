@@ -591,11 +591,13 @@ router.get(
             "waiting",
             "checked_in",
           ])
-          .order("created_at", {
-            ascending: true,
-          })
-          .limit(5);
-
+          .order("priority_level", {
+  ascending: true,
+})
+.order("created_at", {
+  ascending: true,
+})
+.limit(5);
       // Waiting count
       const { count: waitingCount } =
         await supabaseAdmin
@@ -1223,9 +1225,12 @@ router.get(
       `)
       .eq("hospital_id", hospitalId)
       .eq("booking_date", today)
-      .order("created_at", {
-        ascending: true,
-      });
+      .order("priority_level", {
+  ascending: true,
+})
+.order("created_at", {
+  ascending: true,
+});
 
     if (error) {
       return res.status(400).json({
@@ -1815,6 +1820,7 @@ await supabaseAdmin
     message: body,
   });
     }
+
     /* =========================================================
    NOTIFY NEXT PATIENTS
 ========================================================= */
@@ -1848,6 +1854,140 @@ if (status === "called") {
     });
   }
 });
+/* =========================================================
+   UPDATE PATIENT TRIAGE PRIORITY
+========================================================= */
+
+router.post(
+  "/update-priority",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const {
+        booking_id,
+        priority,
+        triage_note,
+      } = req.body;
+
+
+      const priorities = {
+        emergency: 1,
+        urgent: 2,
+        normal: 3,
+        low: 4,
+      };
+
+
+      if (!booking_id || !priority) {
+        return res.status(400).json({
+          success:false,
+          error:
+          "booking_id and priority are required",
+        });
+      }
+
+
+      if (!priorities[priority]) {
+        return res.status(400).json({
+          success:false,
+          error:
+          "Invalid priority",
+        });
+      }
+
+
+      // Make sure booking belongs to this hospital
+
+      const { data: booking, error: bookingError } =
+        await supabaseAdmin
+          .from("hospital_bookings")
+          .select("id")
+          .eq("id", booking_id)
+          .eq("hospital_id", hospitalId)
+          .maybeSingle();
+
+
+      if (bookingError) {
+        return res.status(400).json({
+          success:false,
+          error: bookingError.message,
+        });
+      }
+
+
+      if (!booking) {
+        return res.status(404).json({
+          success:false,
+          error:
+          "Booking not found",
+        });
+      }
+
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_bookings")
+          .update({
+
+            priority,
+
+            priority_level:
+              priorities[priority],
+
+            triage_note:
+              triage_note || null,
+
+            triage_by:
+              req.user.id,
+
+            triage_at:
+              new Date().toISOString(),
+
+          })
+          .eq("id", booking_id)
+          .select()
+          .single();
+
+
+
+      if (error) {
+        return res.status(400).json({
+          success:false,
+          error:error.message,
+        });
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        booking:data,
+
+      });
+
+
+
+    } catch(err){
+
+      console.log(err);
+
+      return res.status(500).json({
+        success:false,
+        error:err.message,
+      });
+
+    }
+
+  }
+);
 /* =========================================================
    CHECK IN USING QR OR BOOKING CODE
 ========================================================= */
