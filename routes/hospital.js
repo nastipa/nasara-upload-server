@@ -325,12 +325,10 @@ router.post("/join-queue", authenticate, async (req, res) => {
   try {
 
     const {
-      patient_id,
       patient_record_id,
       condition,
       hospital_id: bodyHospitalId,
     } = req.body;
-
 
 
     // Check if current user is hospital admin
@@ -344,9 +342,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
         .maybeSingle();
 
 
-
     const isHospitalAdmin = !!admin;
-
 
 
     let hospital_id;
@@ -354,78 +350,92 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
-    if (isHospitalAdmin) {
+    // ==============================
+    // HOSPITAL ADMIN BOOKING
+    // ==============================
 
+    if (isHospitalAdmin) {
 
       hospital_id = admin.hospital_id;
 
 
-      // Admin must provide patient's auth id
-      // because hospital_bookings.patient_id is uuid
-
-      if (!patient_id) {
+      if (!patient_record_id) {
 
         return res.status(400).json({
           success:false,
           error:
-          "patient_id is required for admin booking"
+          "patient_record_id is required for admin booking"
         });
 
       }
 
 
-      queuePatientId = patient_id;
+
+      const {
+        data: patientRecord,
+        error: patientError
+      } =
+      await supabaseAdmin
+        .from("patient_records")
+        .select("id,user_id")
+        .eq("id", patient_record_id)
+        .single();
 
 
 
-      // Validate patient record if provided
+      if(patientError){
 
-      if(patient_record_id){
-
-        const {
-          data: patientRecord,
-          error: patientError
-        } =
-        await supabaseAdmin
-          .from("patient_records")
-          .select("id")
-          .eq("id", patient_record_id)
-          .maybeSingle();
-
-
-
-        if(patientError){
-
-          return res.status(400).json({
-            success:false,
-            error:patientError.message
-          });
-
-        }
-
-
-
-        if(!patientRecord){
-
-          return res.status(404).json({
-            success:false,
-            error:"Patient record not found"
-          });
-
-        }
+        return res.status(400).json({
+          success:false,
+          error:patientError.message
+        });
 
       }
+
+
+
+      if(!patientRecord){
+
+        return res.status(404).json({
+          success:false,
+          error:"Patient record not found"
+        });
+
+      }
+
+
+
+      if(!patientRecord.user_id){
+
+        return res.status(400).json({
+          success:false,
+          error:
+          "Patient record is not linked to an account"
+        });
+
+      }
+
+
+
+      queuePatientId =
+        patientRecord.user_id;
 
 
 
     } else {
 
 
-      // Normal patient
+      // ==============================
+      // NORMAL PATIENT BOOKING
+      // ==============================
 
-      hospital_id = bodyHospitalId;
 
-      queuePatientId = req.user.id;
+      hospital_id =
+        bodyHospitalId;
+
+
+      queuePatientId =
+        req.user.id;
 
 
     }
@@ -447,6 +457,8 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
+
+    // Today's date
 
     const bookingDate =
       new Date()
@@ -482,6 +494,8 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
+
+
     if(depError || !department){
 
       return res.status(400).json({
@@ -503,7 +517,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
-    // Count today's queue
+    // Count queue number
 
     const {
       count
@@ -538,17 +552,8 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
-    const prefix =
-      department.name
-      .substring(0,3)
-      .toUpperCase();
-
-
-
-
-
     const queueNumber =
-      `${prefix}-${String(queuePosition).padStart(3,"0")}`;
+      `${department.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
 
 
 
@@ -581,6 +586,8 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
+
+    // Insert booking
 
     const {
       data: booking,
@@ -659,6 +666,8 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 
 
+    // Notification
+
     await supabaseAdmin
       .from("hospital_notifications")
       .insert({
@@ -693,6 +702,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
       booking
 
     });
+
 
 
 
