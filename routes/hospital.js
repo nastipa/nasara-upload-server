@@ -153,6 +153,9 @@ async function notifyNextPatients(
 
       if (!patient.almost_notified) {
 
+
+if(patient.patient_id){
+
   notifyUser(
     patient.patient_id,
     title,
@@ -163,17 +166,19 @@ async function notifyNextPatients(
       err.message
     )
   );
-  await supabaseAdmin
-  .from("hospital_notifications")
-  .insert({
-    hospital_id: hospitalId,
-    patient_id: patient.patient_id,
-    booking_id: patient.id,
-    title,
-    message: body,
-  });
+
+}
 
 
+await supabaseAdmin
+.from("hospital_notifications")
+.insert({
+  hospital_id: hospitalId,
+  patient_id: patient.patient_id,
+  booking_id: patient.id,
+  title,
+  message: body,
+});
   await supabaseAdmin
     .from("hospital_bookings")
     .update({
@@ -330,9 +335,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
       hospital_id: bodyHospitalId,
     } = req.body;
 
-
     // Check if current user is hospital admin
-
     const { data: admin } =
       await supabaseAdmin
         .from("hospital_admins")
@@ -341,14 +344,11 @@ router.post("/join-queue", authenticate, async (req, res) => {
         .eq("status", "approved")
         .maybeSingle();
 
-
     const isHospitalAdmin = !!admin;
-
 
     let hospital_id;
     let queuePatientId;
-
-
+    let bookingPatientRecordId;
 
     // ==============================
     // HOSPITAL ADMIN BOOKING
@@ -358,374 +358,360 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
       hospital_id = admin.hospital_id;
 
-
       if (!patient_record_id) {
-
         return res.status(400).json({
-          success:false,
+          success: false,
           error:
-          "patient_record_id is required for admin booking"
+            "patient_record_id is required for admin booking",
         });
-
       }
-
-
 
       const {
         data: patientRecord,
-        error: patientError
-      } =
-      await supabaseAdmin
+        error: patientError,
+      } = await supabaseAdmin
         .from("patient_records")
         .select("id,user_id")
         .eq("id", patient_record_id)
         .single();
 
-
-
-      if(patientError){
-
+      if (patientError) {
         return res.status(400).json({
-          success:false,
-          error:patientError.message
+          success: false,
+          error: patientError.message,
         });
-
       }
 
-
-
-      if(!patientRecord){
-
+      if (!patientRecord) {
         return res.status(404).json({
-          success:false,
-          error:"Patient record not found"
+          success: false,
+          error: "Patient record not found",
         });
-
       }
 
+      bookingPatientRecordId = patientRecord.id;
 
-
-      if(!patientRecord.user_id){
-
-        return res.status(400).json({
-          success:false,
-          error:
-          "Patient record is not linked to an account"
-        });
-
-      }
-
-
-
-      queuePatientId =
-        patientRecord.user_id;
-
-
+      // Walk-in patients have no account.
+      // Registered patients have a user_id.
+      queuePatientId = patientRecord.user_id || null;
 
     } else {
-
 
       // ==============================
       // NORMAL PATIENT BOOKING
       // ==============================
 
+      hospital_id = bodyHospitalId;
 
-      hospital_id =
-        bodyHospitalId;
+      queuePatientId = req.user.id;
 
+      const {
+        data: patientRecord,
+        error: patientError,
+      } = await supabaseAdmin
+        .from("patient_records")
+        .select("id")
+        .eq("user_id", req.user.id)
+        .maybeSingle();
 
-      queuePatientId =
-        req.user.id;
+      if (patientError) {
+        return res.status(400).json({
+          success: false,
+          error: patientError.message,
+        });
+      }
 
+      if (!patientRecord) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Patient profile not found. Please complete your patient registration first.",
+        });
+      }
 
+      bookingPatientRecordId = patientRecord.id;
     }
 
-
-
-
-    if(
-      !hospital_id ||
-      !queuePatientId
-    ){
-
+    if (!hospital_id) {
       return res.status(400).json({
-        success:false,
-        error:"Missing required fields"
+        success: false,
+        error: "Hospital is required",
       });
-
     }
-
-
-
 
     // Today's date
-
     const bookingDate =
       new Date()
-      .toISOString()
-      .split("T")[0];
+        .toISOString()
+        .split("T")[0];
+        /* ==============================
+   GET OPD DEPARTMENT
+============================== */
+
+const {
+  data: department,
+  error: depError
+} =
+await supabaseAdmin
+  .from("hospital_departments")
+  .select("*")
+  .eq(
+    "hospital_id",
+    hospital_id
+  )
+  .ilike(
+    "name",
+    "OPD"
+  )
+  .eq(
+    "is_active",
+    true
+  )
+  .maybeSingle();
 
 
+if (depError || !department) {
 
+  return res.status(400).json({
+    success:false,
+    error:
+    "OPD department has not been created for this hospital."
+  });
 
+}
 
-    // Get OPD department
 
-    const {
-      data: department,
-      error: depError
-    } =
-    await supabaseAdmin
-      .from("hospital_departments")
-      .select("*")
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .ilike(
-        "name",
-        "OPD"
-      )
-      .eq(
-        "is_active",
-        true
-      )
-      .maybeSingle();
+const department_id =
+  department.id;
 
 
+/* ==============================
+   COUNT QUEUE NUMBER
+============================== */
 
+const {
+  count
+} =
+await supabaseAdmin
+  .from("hospital_bookings")
+  .select("*", {
+    count:"exact",
+    head:true
+  })
+  .eq(
+    "hospital_id",
+    hospital_id
+  )
+  .eq(
+    "department_id",
+    department_id
+  )
+  .eq(
+    "booking_date",
+    bookingDate
+  );
 
 
-    if(depError || !department){
+const queuePosition =
+  (count || 0) + 1;
 
-      return res.status(400).json({
-        success:false,
-        error:
-        "OPD department has not been created for this hospital."
-      });
 
-    }
 
+const queueNumber =
+  `${department.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
 
 
 
+/* ==============================
+   BOOKING CODE
+============================== */
 
-    const department_id =
-      department.id;
+const bookingCode =
+  "NHS-" +
+  crypto
+    .randomBytes(3)
+    .toString("hex")
+    .toUpperCase();
 
 
 
+/* ==============================
+   WAIT TIME
+============================== */
 
+const estimatedWait =
+  queuePosition *
+  (
+    department.average_minutes || 10
+  );
 
-    // Count queue number
 
-    const {
-      count
-    } =
-    await supabaseAdmin
-      .from("hospital_bookings")
-      .select("*",{
-        count:"exact",
-        head:true
-      })
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      )
-      .eq(
-        "booking_date",
-        bookingDate
-      );
 
+/* ==============================
+   PRIORITY SUGGESTION
+============================== */
 
+const prioritySuggestion =
+  suggestPriority(condition);
 
 
 
-    const queuePosition =
-      (count || 0) + 1;
+/* ==============================
+   INSERT BOOKING
+============================== */
 
+const {
+  data: booking,
+  error: bookingError
+} =
+await supabaseAdmin
+  .from("hospital_bookings")
+  .insert({
 
+    hospital_id,
 
+    // NULL for walk-in patients
+    // Auth ID for registered patients
+    patient_id:
+      queuePatientId,
 
 
-    const queueNumber =
-      `${department.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
+    patient_record_id:
+      bookingPatientRecordId,
 
 
+    department_id,
 
 
+    booking_date:
+      bookingDate,
 
-    const bookingCode =
-      "NHS-" +
-      crypto
-      .randomBytes(3)
-      .toString("hex")
-      .toUpperCase();
 
+    condition:
+      condition || null,
 
 
+    priority:
+      prioritySuggestion.priority,
 
 
-    const estimatedWait =
-      queuePosition *
-      (
-        department.average_minutes || 10
-      );
+    priority_level:
+      prioritySuggestion.level,
 
 
+    queue_number:
+      queueNumber,
 
 
+    booking_code:
+      bookingCode,
 
-    const prioritySuggestion =
-      suggestPriority(condition);
 
+    qr_code:
+      bookingCode,
 
 
+    estimated_wait_minutes:
+      estimatedWait,
 
 
-    // Insert booking
+    status:
+      "waiting"
 
-    const {
-      data: booking,
-      error: bookingError
-    } =
-    await supabaseAdmin
-      .from("hospital_bookings")
-      .insert({
+  })
+  .select()
+  .single();
 
-        hospital_id,
 
-        patient_id:
-          queuePatientId,
+if (bookingError) {
 
+  return res.status(400).json({
+    success:false,
+    error:bookingError.message
+  });
 
-        patient_record_id:
-          patient_record_id || null,
+}
+/* ==============================
+   SEND QUEUE NOTIFICATION
+============================== */
 
+// Only notify if patient has an account
+if (queuePatientId) {
 
-        department_id,
+  await supabaseAdmin
+    .from("hospital_notifications")
+    .insert({
 
+      hospital_id,
 
-        booking_date:
-          bookingDate,
+      patient_id:
+        queuePatientId,
 
 
-        condition:
-          condition || null,
+      booking_id:
+        booking.id,
 
 
-        priority:
-          prioritySuggestion.priority,
+      title:
+        "Queue Joined",
 
 
-        priority_level:
-          prioritySuggestion.level,
-
-
-        queue_number:
-          queueNumber,
-
-
-        booking_code:
-          bookingCode,
-
-
-        qr_code:
-          bookingCode,
-
-
-        estimated_wait_minutes:
-          estimatedWait,
-
-
-        status:
-          "waiting"
-
-      })
-      .select()
-      .single();
-
-
-
-
-
-    if(bookingError){
-
-      return res.status(400).json({
-        success:false,
-        error:bookingError.message
-      });
-
-    }
-
-
-
-
-
-    // Notification
-
-    await supabaseAdmin
-      .from("hospital_notifications")
-      .insert({
-
-        hospital_id,
-
-        patient_id:
-          queuePatientId,
-
-
-        booking_id:
-          booking.id,
-
-
-        title:
-          "Queue Joined",
-
-
-        message:
-        `You have joined the queue. Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`
-
-      });
-
-
-
-
-
-    return res.json({
-
-      success:true,
-
-      booking
+      message:
+      `You have joined the queue. Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`
 
     });
 
 
-
-
-
-  } catch(err){
-
+  notifyUser(
+    queuePatientId,
+    "Queue Joined",
+    `Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`
+  )
+  .catch(err =>
     console.log(
-      "join queue error:",
-      err
-    );
+      "Notification error:",
+      err.message
+    )
+  );
+
+}
 
 
-    return res.status(500).json({
+/* ==============================
+   RESPONSE
+============================== */
 
-      success:false,
+return res.json({
 
-      error:err.message
+  success:true,
 
-    });
-
-  }
+  booking
 
 });
+
+
+} catch(err) {
+
+
+console.log(
+  "join queue error:",
+  err
+);
+
+
+return res.status(500).json({
+
+  success:false,
+
+  error:err.message
+
+});
+
+
+}
+
+});
+
 /* =========================================================
    GET LIVE QUEUE PROGRESS
 ========================================================= */
