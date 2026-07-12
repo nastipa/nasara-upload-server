@@ -2557,97 +2557,62 @@ await supabaseAdmin
       let existingUser = false;
 
 
-      // CREATE AUTH USER
+      // ======================================
+// CHECK IF USER ALREADY EXISTS IN AUTH
+// ======================================
 
-      const {
-        data: authData,
-        error: authError,
-      } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
+const {
+  data: users,
+  error: usersError,
+} = await supabaseAdmin.auth.admin.listUsers({
+  page: 1,
+  perPage: 1000,
+});
 
+if (usersError) {
+  return res.status(400).json({
+    error: usersError.message,
+  });
+}
 
-      if (authData?.user) {
-        userId = authData.user.id;
-      }
+const existingAuthUser =
+  users.users.find(
+    (u) =>
+      u.email?.toLowerCase() ===
+      email.toLowerCase()
+  );
 
+if (existingAuthUser) {
+  existingUser = true;
+  userId = existingAuthUser.id;
+} else {
 
+  // CREATE NEW AUTH USER
 
-      // EXISTING NASARA USER
+  const {
+    data: authData,
+    error: authError,
+  } =
+  await supabaseAdmin.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
 
-      if (authError) {
+  if (authError) {
+    return res.status(400).json({
+      error: authError.message,
+    });
+  }
 
-        const msg =
-          authError.message?.toLowerCase() || "";
+  userId = authData.user.id;
+}
 
-
-        if (
-          msg.includes("already") ||
-          msg.includes("exists")
-        ) {
-
-          existingUser = true;
-
-
-          const {
-            data,
-            error,
-          } =
-          await supabaseAdmin.auth.admin.listUsers({
-            page:1,
-            perPage:1000,
-          });
-
-
-          if(error){
-            return res.status(400).json({
-              error:error.message
-            });
-          }
-
-
-          const found =
-          data.users.find(
-            u =>
-            u.email?.toLowerCase()
-            === email.toLowerCase()
-          );
-
-
-          if(!found){
-
-            return res.status(400).json({
-              error:"Existing user not found"
-            });
-
-          }
-
-
-          userId = found.id;
-
-
-        } else {
-
-          return res.status(400).json({
-            error:authError.message
-          });
-
-        }
-      }
-
-
-
-      if(!userId){
-
-        return res.status(400).json({
-          error:"Unable to find user"
-        });
-
-      }
-
+if (!userId) {
+  return res.status(400).json({
+    error: "Unable to find or create user",
+  });
+}
 
 
       // CHECK IF ALREADY ADMIN
