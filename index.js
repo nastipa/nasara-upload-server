@@ -438,6 +438,124 @@ app.post("/create-party-user", async (req, res) => {
     });
   }
 });
+/* ================= CREATE HUB360 ADMIN ================= */
+app.post("/create-hub360-admin", async (req, res) => {
+  try {
+    const {
+      email,
+      password,
+      full_name,
+    } = req.body;
+
+    if (!email || !password || !full_name) {
+      return res.status(400).json({
+        error: "Missing required fields",
+      });
+    }
+
+    let userId;
+    let existingUser = false;
+
+    // Create auth user
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
+
+    if (authData?.user) {
+      userId = authData.user.id;
+    }
+
+    // User already exists
+    if (authError) {
+      const msg = authError.message?.toLowerCase() || "";
+
+      if (
+        msg.includes("already") ||
+        msg.includes("exists")
+      ) {
+        existingUser = true;
+
+        const { data, error } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
+
+        if (error) {
+          return res.status(400).json({
+            error: error.message,
+          });
+        }
+
+        const found = data.users.find(
+          (u) =>
+            u.email?.toLowerCase() ===
+            email.toLowerCase()
+        );
+
+        if (!found) {
+          return res.status(400).json({
+            error: "User exists but cannot be located",
+          });
+        }
+
+        userId = found.id;
+      } else {
+        return res.status(400).json({
+          error: authError.message,
+        });
+      }
+    }
+
+    // Check existing admin profile
+    const { data: existingAdmin } =
+      await supabaseAdmin
+        .from("hub360_admins")
+        .select("id")
+        .eq("auth_user_id", userId)
+        .maybeSingle();
+
+    if (existingAdmin) {
+      return res.status(400).json({
+        error: "User is already a Hub360 admin",
+      });
+    }
+
+    // Insert Institution Admin
+    const { error: insertError } =
+      await supabaseAdmin
+        .from("hub360_admins")
+        .insert({
+          auth_user_id: userId,
+          full_name,
+          email,
+          role: "institution_admin",
+          institution_id: null,
+        });
+
+    if (insertError) {
+      return res.status(400).json({
+        error: insertError.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+      existing_user: existingUser,
+      user_id: userId,
+    });
+
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      error: err.message,
+    });
+  }
+});
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
