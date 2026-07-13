@@ -2509,7 +2509,7 @@ router.post(
 
 const { data: superAdmin } =
   await supabaseAdmin
-    .from("nasara_admins")
+    .from("hospital_admins")
     .select("id")
     .eq("user_id", adminUserId)
     .maybeSingle();
@@ -2557,62 +2557,97 @@ await supabaseAdmin
       let existingUser = false;
 
 
-      // ======================================
-// CHECK IF USER ALREADY EXISTS IN AUTH
-// ======================================
+      // CREATE AUTH USER
 
-const {
-  data: users,
-  error: usersError,
-} = await supabaseAdmin.auth.admin.listUsers({
-  page: 1,
-  perPage: 1000,
-});
+      const {
+        data: authData,
+        error: authError,
+      } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      });
 
-if (usersError) {
-  return res.status(400).json({
-    error: usersError.message,
-  });
-}
 
-const existingAuthUser =
-  users.users.find(
-    (u) =>
-      u.email?.toLowerCase() ===
-      email.toLowerCase()
-  );
+      if (authData?.user) {
+        userId = authData.user.id;
+      }
 
-if (existingAuthUser) {
-  existingUser = true;
-  userId = existingAuthUser.id;
-} else {
 
-  // CREATE NEW AUTH USER
 
-  const {
-    data: authData,
-    error: authError,
-  } =
-  await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
+      // EXISTING NASARA USER
 
-  if (authError) {
-    return res.status(400).json({
-      error: authError.message,
-    });
-  }
+      if (authError) {
 
-  userId = authData.user.id;
-}
+        const msg =
+          authError.message?.toLowerCase() || "";
 
-if (!userId) {
-  return res.status(400).json({
-    error: "Unable to find or create user",
-  });
-}
+
+        if (
+          msg.includes("already") ||
+          msg.includes("exists")
+        ) {
+
+          existingUser = true;
+
+
+          const {
+            data,
+            error,
+          } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page:1,
+            perPage:1000,
+          });
+
+
+          if(error){
+            return res.status(400).json({
+              error:error.message
+            });
+          }
+
+
+          const found =
+          data.users.find(
+            u =>
+            u.email?.toLowerCase()
+            === email.toLowerCase()
+          );
+
+
+          if(!found){
+
+            return res.status(400).json({
+              error:"Existing user not found"
+            });
+
+          }
+
+
+          userId = found.id;
+
+
+        } else {
+
+          return res.status(400).json({
+            error:authError.message
+          });
+
+        }
+      }
+
+
+
+      if(!userId){
+
+        return res.status(400).json({
+          error:"Unable to find user"
+        });
+
+      }
+
 
 
       // CHECK IF ALREADY ADMIN
