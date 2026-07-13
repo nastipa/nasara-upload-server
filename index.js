@@ -74,7 +74,10 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 /* ================= CREATE ADMIN ================= */
 app.post("/create-admin", async (req, res) => {
   try {
-    const { email, password, full_name, system } = req.body;
+    const { email, full_name, system } = req.body;
+    const temporaryPassword =
+  Math.random().toString(36).slice(-8) +
+  Math.floor(Math.random() * 100);
 
     if (!email || !full_name || !system) {
       return res.status(400).json({
@@ -101,11 +104,11 @@ app.post("/create-admin", async (req, res) => {
 
     /* ================= CREATE USER ================= */
     const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
+     await supabaseAdmin.auth.admin.createUser({
+  email,
+  password: temporaryPassword,
+  email_confirm: true,
+});
 
     if (authData?.user) {
       userId = authData.user.id;
@@ -174,6 +177,7 @@ app.post("/create-admin", async (req, res) => {
         user_id: userId,
         full_name,
         role: "admin",
+        must_change_password: true,
       });
 
     if (insertError) {
@@ -185,6 +189,7 @@ app.post("/create-admin", async (req, res) => {
     return res.json({
       success: true,
       user_id: userId,
+       temporary_password: temporaryPassword,
       existing_user: existingUser,
       system,
     });
@@ -201,8 +206,10 @@ app.post("/create-admin", async (req, res) => {
 /* ================= CREATE CONSTITUENCY ADMIN ================= */
 app.post("/create-constituency-admin", async (req, res) => {
   try {
-    const { email, password, full_name, constituency } = req.body;
-
+    const { email, full_name, constituency } = req.body;
+    const temporaryPassword =
+  Math.random().toString(36).slice(-8) +
+  Math.floor(Math.random() * 100);
     if (!email || !password || !constituency) {
       return res.status(400).json({ error: "Missing fields" });
     }
@@ -252,10 +259,10 @@ app.post("/create-constituency-admin", async (req, res) => {
     // 5. create auth user
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
+  email,
+  password: temporaryPassword,
+  email_confirm: true,
+});
 
     if (authError) {
       return res.status(400).json({ error: authError.message });
@@ -274,6 +281,7 @@ app.post("/create-constituency-admin", async (req, res) => {
         constituency_id: constituencyRow.id,
         election_id: election.id,
         active: true,
+        must_change_password: true,
       });
 
     if (insertError) {
@@ -283,6 +291,7 @@ app.post("/create-constituency-admin", async (req, res) => {
     return res.json({
       success: true,
       user_id: userId,
+       temporary_password: temporaryPassword,
       constituency_id: constituencyRow.id,
       election_id: election.id,
     });
@@ -295,14 +304,15 @@ app.post("/create-party-user", async (req, res) => {
   try {
     const {
       email,
-      password,
       full_name,
       phone,
       role,
       status,
       party_id,
     } = req.body;
-
+const temporaryPassword =
+  Math.random().toString(36).slice(-8) +
+  Math.floor(Math.random() * 100);
     // Basic validation
     if (!email || !full_name || !role) {
       return res.status(400).json({
@@ -323,10 +333,10 @@ app.post("/create-party-user", async (req, res) => {
     // Create auth user
     const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
+  email,
+  password: temporaryPassword,
+  email_confirm: true,
+});
 
     if (authData?.user) {
       userId = authData.user.id;
@@ -425,11 +435,11 @@ app.post("/create-party-user", async (req, res) => {
     }
 
     return res.json({
-      success: true,
-      existing_user: existingUser,
-      user_id: userId,
-    });
-
+  success: true,
+  user_id: userId,
+  temporary_password: temporaryPassword,
+  existing_user: existingUser,
+});
   } catch (err) {
     console.log(err);
 
@@ -443,10 +453,11 @@ app.post("/create-hub360-admin", async (req, res) => {
   try {
     const {
       email,
-      password,
       full_name,
     } = req.body;
-
+const temporaryPassword =
+  Math.random().toString(36).slice(-8) +
+  Math.floor(Math.random() * 100);
     if (!email || !password || !full_name) {
       return res.status(400).json({
         error: "Missing required fields",
@@ -458,12 +469,11 @@ app.post("/create-hub360-admin", async (req, res) => {
 
     // Create auth user
     const { data: authData, error: authError } =
-      await supabaseAdmin.auth.admin.createUser({
-        email,
-        password,
-        email_confirm: true,
-      });
-
+     await supabaseAdmin.auth.admin.createUser({
+  email,
+  password: temporaryPassword,
+  email_confirm: true,
+});
     if (authData?.user) {
       userId = authData.user.id;
     }
@@ -533,6 +543,7 @@ app.post("/create-hub360-admin", async (req, res) => {
           full_name,
           email,
           role: "institution_admin",
+          must_change_password: true,
           institution_id: null,
         });
 
@@ -544,8 +555,9 @@ app.post("/create-hub360-admin", async (req, res) => {
 
     return res.json({
       success: true,
+        user_id: userId,
+       temporary_password: temporaryPassword,
       existing_user: existingUser,
-      user_id: userId,
     });
 
   } catch (err) {

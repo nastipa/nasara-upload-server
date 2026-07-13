@@ -2520,14 +2520,17 @@ if (!superAdmin) {
  error:
  "Only Nasara super admin can create hospital administrators."
  });
-}
-      const {
-        email,
-        password,
-        full_name,
-        hospital_id,
-        role,
-      } = req.body;
+}const {
+  email,
+  full_name,
+  hospital_id,
+  role,
+} = req.body;
+
+// Generate a temporary password
+const temporaryPassword =
+  Math.random().toString(36).slice(-8) +
+  Math.floor(Math.random() * 100);
       const { data: hospital } =
 await supabaseAdmin
 .from("hospitals")
@@ -2565,7 +2568,7 @@ await supabaseAdmin
       } =
       await supabaseAdmin.auth.admin.createUser({
         email,
-        password,
+        password: temporaryPassword,
         email_confirm: true,
       });
 
@@ -2685,7 +2688,7 @@ await supabaseAdmin
         user_id:userId,
 
         hospital_id,
-
+        must_change_password: true,
         full_name,
 
         role:
@@ -2709,15 +2712,15 @@ await supabaseAdmin
 
       return res.json({
 
-        success:true,
+  success: true,
 
-        existing_user:existingUser,
+  existing_user: existingUser,
 
-        user_id:userId
+  user_id: userId,
 
-      });
+  temporary_password: temporaryPassword
 
-
+});
 
     } catch(err){
 
