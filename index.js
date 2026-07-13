@@ -206,10 +206,9 @@ app.post("/create-constituency-admin", async (req, res) => {
     const temporaryPassword =
   Math.random().toString(36).slice(-8) +
   Math.floor(Math.random() * 100);
-    if (!email || !password || !constituency) {
-      return res.status(400).json({ error: "Missing fields" });
-    }
-
+    if (!email || !full_name || !constituency) {
+  return res.status(400).json({ error: "Missing fields" });
+}
     // 1. active election
     const { data: election, error: electionError } = await supabaseAdmin
       .from("election")
@@ -454,7 +453,7 @@ app.post("/create-hub360-admin", async (req, res) => {
 const temporaryPassword =
   Math.random().toString(36).slice(-8) +
   Math.floor(Math.random() * 100);
-    if (!email || !password || !full_name) {
+    if (!email || !full_name) {
       return res.status(400).json({
         error: "Missing required fields",
       });
