@@ -74,10 +74,8 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 /* ================= CREATE ADMIN ================= */
 app.post("/create-admin", async (req, res) => {
   try {
-    const { email, full_name, system } = req.body;
-    const temporaryPassword =
-  Math.random().toString(36).slice(-8) +
-  Math.floor(Math.random() * 100);
+    const { email,password, full_name, system } = req.body;
+    
 
     if (!email || !full_name || !system) {
       return res.status(400).json({
@@ -106,7 +104,7 @@ app.post("/create-admin", async (req, res) => {
     const { data: authData, error: authError } =
      await supabaseAdmin.auth.admin.createUser({
   email,
-  password: temporaryPassword,
+  password,
   email_confirm: true,
 });
 
@@ -177,7 +175,6 @@ app.post("/create-admin", async (req, res) => {
         user_id: userId,
         full_name,
         role: "admin",
-        must_change_password: true,
       });
 
     if (insertError) {
@@ -189,7 +186,6 @@ app.post("/create-admin", async (req, res) => {
     return res.json({
       success: true,
       user_id: userId,
-       temporary_password: temporaryPassword,
       existing_user: existingUser,
       system,
     });

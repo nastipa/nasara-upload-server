@@ -2522,15 +2522,12 @@ if (!superAdmin) {
  });
 }const {
   email,
+  password,
   full_name,
   hospital_id,
   role,
 } = req.body;
 
-// Generate a temporary password
-const temporaryPassword =
-  Math.random().toString(36).slice(-8) +
-  Math.floor(Math.random() * 100);
       const { data: hospital } =
 await supabaseAdmin
 .from("hospitals")
@@ -2568,7 +2565,7 @@ await supabaseAdmin
       } =
       await supabaseAdmin.auth.admin.createUser({
         email,
-        password: temporaryPassword,
+        password,
         email_confirm: true,
       });
 
@@ -2688,7 +2685,6 @@ await supabaseAdmin
         user_id:userId,
 
         hospital_id,
-        must_change_password: true,
         full_name,
 
         role:
@@ -2717,8 +2713,6 @@ await supabaseAdmin
   existing_user: existingUser,
 
   user_id: userId,
-
-  temporary_password: temporaryPassword
 
 });
 
