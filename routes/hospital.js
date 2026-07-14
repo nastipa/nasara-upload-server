@@ -213,9 +213,12 @@ function suggestPriority(condition) {
     condition.toLowerCase();
 
 
+
+  // Highest priority
   const emergencyWords = [
     "chest pain",
     "difficulty breathing",
+    "cannot breathe",
     "unconscious",
     "severe bleeding",
     "stroke",
@@ -223,17 +226,45 @@ function suggestPriority(condition) {
     "convulsion",
     "accident",
     "critical",
+    "severe injury",
+    "collapsed",
   ];
 
 
+
+  // Urgent cases
   const urgentWords = [
-    "pregnancy pain",
     "high fever",
     "severe pain",
     "vomiting",
-    "infection",
     "dehydration",
+    "infection",
+    "pregnancy pain",
+    "bleeding pregnancy",
+    "labour pain",
+    "child very sick",
   ];
+
+
+
+  // Special priority cases
+  const specialPriorityWords = [
+    "elderly",
+    "old person",
+    "aged",
+    "disabled",
+    "disability",
+    "wheelchair",
+    "pregnant",
+    "pregnancy",
+    "infant",
+    "baby",
+    "newborn",
+    "referral",
+    "referred",
+    "transfer patient",
+  ];
+
 
 
   const lowWords = [
@@ -241,7 +272,9 @@ function suggestPriority(condition) {
     "routine",
     "follow up",
     "minor",
+    "review",
   ];
+
 
 
   if (
@@ -250,10 +283,11 @@ function suggestPriority(condition) {
     )
   ) {
     return {
-      priority:"emergency",
-      level:1,
+      priority: "emergency",
+      level: 1,
     };
   }
+
 
 
   if (
@@ -262,10 +296,29 @@ function suggestPriority(condition) {
     )
   ) {
     return {
-      priority:"urgent",
-      level:2,
+      priority: "urgent",
+      level: 2,
     };
   }
+
+
+
+  /*
+    Special cases:
+    These should not override emergency/urgent,
+    but they should come before normal patients.
+  */
+  if (
+    specialPriorityWords.some(
+      word => text.includes(word)
+    )
+  ) {
+    return {
+      priority: "urgent",
+      level: 2,
+    };
+  }
+
 
 
   if (
@@ -274,15 +327,16 @@ function suggestPriority(condition) {
     )
   ) {
     return {
-      priority:"low",
-      level:4,
+      priority: "low",
+      level: 4,
     };
   }
 
 
+
   return {
-    priority:"normal",
-    level:3,
+    priority: "normal",
+    level: 3,
   };
 
 }
@@ -332,6 +386,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
     const {
       patient_record_id,
       condition,
+      priority_case,
       hospital_id: bodyHospitalId,
     } = req.body;
 
@@ -548,11 +603,96 @@ const estimatedWait =
 
 
 /* ==============================
-   PRIORITY SUGGESTION
+   PRIORITY HANDLING
+   Hospital walk-in:
+   staff selects priority
+
+   Online booking:
+   system suggests priority
 ============================== */
 
-const prioritySuggestion =
-  suggestPriority(condition);
+
+let finalPriority;
+
+
+// Hospital admin/reception booking
+if (
+  isHospitalAdmin &&
+  priority_case
+) {
+
+
+  const priorityMap = {
+
+    emergency:{
+      priority:"emergency",
+      level:1,
+    },
+
+
+    urgent:{
+      priority:"urgent",
+      level:2,
+    },
+
+
+    infant:{
+      priority:"infant",
+      level:3,
+    },
+
+
+    pregnant:{
+      priority:"pregnant",
+      level:4,
+    },
+
+
+    elderly:{
+      priority:"elderly",
+      level:5,
+    },
+
+
+    disability:{
+      priority:"disability",
+      level:6,
+    },
+
+
+    referral:{
+      priority:"referral",
+      level:7,
+    },
+
+
+    normal:{
+      priority:"normal",
+      level:8,
+    },
+
+  };
+
+
+  finalPriority =
+    priorityMap[
+      priority_case.toLowerCase()
+    ] ||
+    priorityMap.normal;
+
+
+} else {
+
+
+  // Online patient booking
+  // Use condition description
+  // to suggest priority
+
+  finalPriority =
+    suggestPriority(condition);
+
+
+}
 
 
 
@@ -591,12 +731,11 @@ await supabaseAdmin
       condition || null,
 
 
-    priority:
-      prioritySuggestion.priority,
+   priority:
+  finalPriority.priority,
 
-
-    priority_level:
-      prioritySuggestion.level,
+priority_level:
+  finalPriority.level,
 
 
     queue_number:
@@ -2241,12 +2380,16 @@ router.post(
 
 
       const priorities = {
-        emergency: 1,
-        urgent: 2,
-        normal: 3,
-        low: 4,
-      };
-
+  emergency: 1,
+  urgent: 2,
+  elderly: 2,
+  disability: 2,
+  pregnant: 2,
+  infant: 2,
+  referral: 2,
+  normal: 3,
+  low: 4,
+};
 
       if (!booking_id || !priority) {
         return res.status(400).json({
@@ -2307,10 +2450,10 @@ router.post(
             triage_note:
               triage_note || null,
 
-            triage_by:
+            triaged_by:
               req.user.id,
 
-            triage_at:
+            triaged_at:
               new Date().toISOString(),
 
           })
