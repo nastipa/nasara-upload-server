@@ -2161,12 +2161,12 @@ router.get(
     const { data, error } = await supabaseAdmin
       .from("hospital_bookings")
       .select(`
-        *,
-        hospital_departments(
-          id,
-          name
-        )
-      `)
+  *,
+  hospital_departments!hospital_bookings_department_id_fkey(
+    id,
+    name
+  )
+`)
       .eq("hospital_id", hospitalId)
       .eq("booking_date", today)
       .order("priority_level", {
