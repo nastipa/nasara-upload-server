@@ -2201,7 +2201,7 @@ router.get(
    LIVE DEPARTMENT DASHBOARD
 ========================================================= */
 
-router.get(
+router.post(
   "/department-dashboard",
   authenticate,
   hospitalAdminAuth,
@@ -2213,106 +2213,262 @@ router.get(
         req.hospitalAdmin.hospital_id;
 
       const {
-  data: departments,
-  error: depError,
-} = await supabaseAdmin
-  .from("hospital_departments")
-  .select(`
-    id,
-    name
-  `)
-  .eq("hospital_id", hospitalId);
+        department_id,
+      } = req.body;
 
-if (depError) {
+      if (!department_id) {
 
-  return res.status(400).json({
+        return res.status(400).json({
 
-    success: false,
+          error:
+            "department_id is required",
 
-    error: depError.message,
+        });
 
-  });
+      }
 
-}
+      const {
+        data: department,
+        error: departmentError,
+      } =
+        await supabaseAdmin
+          .from(
+            "hospital_departments"
+          )
+          .select(`
+            id,
+            name,
+            average_minutes
+          `)
+          .eq(
+            "id",
+            department_id
+          )
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .single();
 
-const dashboard = [];
-for (const dept of departments) {
+      if (
+        departmentError ||
+        !department
+      ) {
 
-  const today = new Date()
-  .toISOString()
-  .split("T")[0];
+        return res.status(404).json({
 
-const {
-  data: bookings,
-  error,
-} = await supabaseAdmin
-  .from("hospital_bookings")
-  .select(`
-    status,
-    priority
-  `)
-  .eq("hospital_id", hospitalId)
-  .eq("department_id", dept.id)
-  .eq("booking_date", today);
-  if (error) continue;
+          error:
+            "Department not found",
 
-  dashboard.push({
+        });
 
-    department_id:
-      dept.id,
+      }
 
-    department_name:
-      dept.name,
+      const today =
+        new Date()
+          .toISOString()
+          .split("T")[0];
 
-    total_patients:
-      bookings.length,
+      const {
+        data: bookings,
+        error: bookingError,
+      } =
+        await supabaseAdmin
+          .from(
+            "hospital_bookings"
+          )
+          .select(`
+            id,
+            queue_number,
+            booking_code,
+            patient_name,
+            priority,
+            priority_level,
+            status,
+            checked_in,
+            condition,
+            created_at
+          `)
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .eq(
+            "department_id",
+            department_id
+          )
+          .eq(
+            "booking_date",
+            today
+          )
+          .order(
+            "priority_level",
+            {
+              ascending: true,
+            }
+          )
+          .order(
+            "created_at",
+            {
+              ascending: true,
+            }
+          );
 
-    waiting:
-      bookings.filter(
-        b => b.status === "waiting"
-      ).length,
+      if (bookingError) {
 
-    called:
-      bookings.filter(
-        b => b.status === "called"
-      ).length,
+        return res.status(400).json({
 
-    checked_in:
-      bookings.filter(
-        b => b.status === "checked_in"
-      ).length,
+          error:
+            bookingError.message,
 
-    completed:
-      bookings.filter(
-        b => b.status === "completed"
-      ).length,
+        });
 
-    emergency:
-      bookings.filter(
-        b => b.priority === "emergency"
-      ).length,
+      }
+      const statistics = {
 
-  });
+        waiting:
+          bookings.filter(
+            b =>
+              b.status ===
+              "waiting"
+          ).length,
 
-}
-return res.json({
+        called:
+          bookings.filter(
+            b =>
+              b.status ===
+              "called"
+          ).length,
 
-  success: true,
+        checked_in:
+          bookings.filter(
+            b =>
+              b.status ===
+              "checked_in"
+          ).length,
 
-  total_departments:
-    dashboard.length,
+        completed:
+          bookings.filter(
+            b =>
+              b.status ===
+              "completed"
+          ).length,
 
-  departments:
-    dashboard,
+        total_today:
+          bookings.length,
 
-});
+      };
+
+      const currentPatient =
+        bookings.find(
+          b =>
+            b.status ===
+            "called"
+        ) || null;
+
+      const queue =
+        bookings.map(
+          booking => ({
+
+            booking_id:
+              booking.id,
+
+            queue_number:
+              booking.queue_number,
+
+            booking_code:
+              booking.booking_code,
+
+            patient_name:
+              booking.patient_name,
+
+            priority:
+              booking.priority,
+
+            priority_level:
+              booking.priority_level,
+
+            status:
+              booking.status,
+
+            checked_in:
+              booking.checked_in,
+
+            condition:
+              booking.condition,
+
+            created_at:
+              booking.created_at,
+
+          })
+        );
+
+      return res.json({
+
+        department: {
+
+          id:
+            department.id,
+
+          name:
+            department.name,
+
+          average_minutes:
+            department.average_minutes,
+
+        },
+
+        statistics,
+
+        current_patient:
+          currentPatient
+            ? {
+
+                booking_id:
+                  currentPatient.id,
+
+                queue_number:
+                  currentPatient.queue_number,
+
+                booking_code:
+                  currentPatient.booking_code,
+
+                patient_name:
+                  currentPatient.patient_name,
+
+                priority:
+                  currentPatient.priority,
+
+                priority_level:
+                  currentPatient.priority_level,
+
+                status:
+                  currentPatient.status,
+
+                checked_in:
+                  currentPatient.checked_in,
+
+                condition:
+                  currentPatient.condition,
+
+                created_at:
+                  currentPatient.created_at,
+
+              }
+            : null,
+
+        queue,
+
+      });
+
     } catch (err) {
+
+      console.error(err);
 
       return res.status(500).json({
 
-        success: false,
-
-        error: err.message,
+        error:
+          err.message,
 
       });
 
