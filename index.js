@@ -563,6 +563,193 @@ const temporaryPassword =
     });
   }
 });
+/* ================= CREATE HUB360 USER ================= */
+app.post("/create-hub360-user", async (req, res) => {
+  try {
+    const {
+      email,
+      full_name,
+      role,
+      institution_id,
+      group_id,
+    } = req.body;
+
+    const temporaryPassword =
+      Math.random().toString(36).slice(-8) +
+      Math.floor(Math.random() * 100);
+
+    if (
+      !email ||
+      !full_name ||
+      !role ||
+      !institution_id
+    ) {
+      return res.status(400).json({
+        error: "Missing required fields",
+      });
+    }
+
+    let userId;
+    let existingUser = false;
+
+    // Create Auth user
+    const {
+      data: authData,
+      error: authError,
+    } =
+      await supabaseAdmin.auth.admin.createUser({
+        email,
+        password: temporaryPassword,
+        email_confirm: true,
+      });
+
+    if (authData?.user) {
+      userId = authData.user.id;
+    }
+
+    // Existing Auth user
+    if (authError) {
+      const msg =
+        authError.message?.toLowerCase() || "";
+
+      if (
+        msg.includes("already") ||
+        msg.includes("exists")
+      ) {
+        existingUser = true;
+
+        const {
+          data,
+          error,
+        } =
+          await supabaseAdmin.auth.admin.listUsers({
+            page: 1,
+            perPage: 1000,
+          });
+
+        if (error) {
+          return res.status(400).json({
+            error: error.message,
+          });
+        }
+
+        const found = data.users.find(
+          (u) =>
+            u.email?.toLowerCase() ===
+            email.toLowerCase()
+        );
+
+        if (!found) {
+          return res.status(400).json({
+            error: "User exists but not found",
+          });
+        }
+
+        userId = found.id;
+      } else {
+        return res.status(400).json({
+          error: authError.message,
+        });
+      }
+    }
+
+    // Upsert hub_users
+    const { data: existingProfile } =
+      await supabaseAdmin
+        .from("hub_users")
+        .select("id")
+        .eq("auth_user_id", userId)
+        .maybeSingle();
+
+    const payload = {
+      auth_user_id: userId,
+      email,
+      full_name,
+      role,
+      institution_id,
+      group_id:
+        role === "student"
+          ? group_id
+          : null,
+    };
+
+    if (existingProfile) {
+      const { error } =
+        await supabaseAdmin
+          .from("hub_users")
+          .update(payload)
+          .eq("auth_user_id", userId);
+
+      if (error) {
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+    } else {
+      const { error } =
+        await supabaseAdmin
+          .from("hub_users")
+          .insert(payload);
+
+      if (error) {
+        return res.status(400).json({
+          error: error.message,
+        });
+      }
+    }
+
+    // Roles that should become Hub360 admins
+    const adminRoles = [
+      "administrator",
+      "hr_manager",
+      "accountant",
+      "secretary",
+      "data_entry_officer",
+    ];
+
+    if (adminRoles.includes(role)) {
+      const { data: existingAdmin } =
+        await supabaseAdmin
+          .from("hub360_admins")
+          .select("id")
+          .eq("auth_user_id", userId)
+          .maybeSingle();
+
+      if (!existingAdmin) {
+        const { error } =
+          await supabaseAdmin
+            .from("hub360_admins")
+            .insert({
+              auth_user_id: userId,
+              email,
+              full_name,
+              institution_id,
+              role,
+            });
+
+        if (error) {
+          return res.status(400).json({
+            error: error.message,
+          });
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      user_id: userId,
+      temporary_password:
+        temporaryPassword,
+      existing_user: existingUser,
+    });
+  } catch (err) {
+    console.log(err);
+
+    return res.status(500).json({
+      error: err.message,
+    });
+  }
+});
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
