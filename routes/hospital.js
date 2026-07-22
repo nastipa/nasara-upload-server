@@ -2278,17 +2278,17 @@ router.post(
             "hospital_bookings"
           )
           .select(`
-            id,
-            queue_number,
-            booking_code,
-            patient_name,
-            priority,
-            priority_level,
-            status,
-            checked_in,
-            condition,
-            created_at
-          `)
+  id,
+  queue_number,
+  booking_code,
+  patient_record_id,
+  priority,
+  priority_level,
+  status,
+  checked_in,
+  condition,
+  created_at
+`)
           .eq(
             "hospital_id",
             hospitalId
@@ -2324,6 +2324,41 @@ router.post(
         });
 
       }
+      const patientIds = bookings
+  .map(b => b.patient_record_id)
+  .filter(Boolean);
+
+let patientMap = {};
+
+if (patientIds.length > 0) {
+
+  const {
+    data: patients,
+    error: patientError,
+  } = await supabaseAdmin
+    .from("patient_records")
+    .select(`
+      id,
+      full_name
+    `)
+    .in("id", patientIds);
+
+  if (!patientError && patients) {
+
+    patientMap = patients.reduce(
+      (acc, patient) => {
+
+        acc[patient.id] = patient.full_name;
+
+        return acc;
+
+      },
+      {}
+    );
+
+  }
+
+}
       const statistics = {
 
         waiting:
@@ -2380,7 +2415,9 @@ router.post(
               booking.booking_code,
 
             patient_name:
-              booking.patient_name,
+  patientMap[
+    booking.patient_record_id
+  ] || "Unknown Patient",
 
             priority:
               booking.priority,
@@ -2434,8 +2471,9 @@ router.post(
                   currentPatient.booking_code,
 
                 patient_name:
-                  currentPatient.patient_name,
-
+  patientMap[
+    currentPatient.patient_record_id
+  ] || "Unknown Patient",
                 priority:
                   currentPatient.priority,
 
