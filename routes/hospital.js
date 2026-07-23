@@ -2346,39 +2346,40 @@ if (patientIds.length > 0) {
 }
       const statistics = {
 
-        waiting:
-          bookings.filter(
-            b =>
-              b.status ===
-              "waiting"
-          ).length,
+  waiting:
+    bookings.filter(
+      b => b.status === "waiting"
+    ).length,
 
-        called:
-          bookings.filter(
-            b =>
-              b.status ===
-              "called"
-          ).length,
+  called:
+    bookings.filter(
+      b => b.status === "called"
+    ).length,
 
-        checked_in:
-          bookings.filter(
-            b =>
-              b.status ===
-              "checked_in"
-          ).length,
+  checked_in:
+    bookings.filter(
+      b => b.status === "checked_in"
+    ).length,
 
-        completed:
-          bookings.filter(
-            b =>
-              b.status ===
-              "completed"
-          ).length,
+  completed:
+    bookings.filter(
+      b => b.status === "completed"
+    ).length,
 
-        total_today:
-          bookings.length,
+  emergency:
+    bookings.filter(
+      b => b.priority === "emergency"
+    ).length,
 
-      };
+  urgent:
+    bookings.filter(
+      b => b.priority === "urgent"
+    ).length,
 
+  total_today:
+    bookings.length,
+
+};
       const currentPatient =
         bookings.find(
           b =>
@@ -2499,127 +2500,7 @@ if (patientIds.length > 0) {
 
   }
 );
-/* =========================================================
-   ALL DEPARTMENT DASHBOARD
-========================================================= */
 
-router.get(
-  "/department-dashboard-all",
-  authenticate,
-  hospitalAdminAuth,
-  async (req, res) => {
-
-    try {
-
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
-
-      const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
-
-      const {
-        data: departments,
-        error: departmentError,
-      } = await supabaseAdmin
-        .from("hospital_departments")
-        .select(`
-          id,
-          name
-        `)
-        .eq("hospital_id", hospitalId)
-        .eq("is_active", true)
-        .order("name");
-
-      if (departmentError) {
-
-        return res.status(400).json({
-          success: false,
-          error: departmentError.message,
-        });
-
-      }
-
-      const result = [];
-
-      for (const dept of departments || []) {
-
-        const {
-          data: bookings,
-          error,
-        } = await supabaseAdmin
-          .from("hospital_bookings")
-          .select(`
-            status,
-            priority
-          `)
-          .eq("hospital_id", hospitalId)
-          .eq("department_id", dept.id)
-          .eq("booking_date", today);
-
-        if (error) continue;
-
-        result.push({
-
-          department_id: dept.id,
-
-          department_name: dept.name,
-
-          waiting:
-            bookings.filter(
-              b => b.status === "waiting"
-            ).length,
-
-          called:
-            bookings.filter(
-              b => b.status === "called"
-            ).length,
-
-          checked_in:
-            bookings.filter(
-              b => b.status === "checked_in"
-            ).length,
-
-          completed:
-            bookings.filter(
-              b => b.status === "completed"
-            ).length,
-
-          emergency:
-            bookings.filter(
-              b =>
-                b.priority === "emergency"
-            ).length,
-
-        });
-
-      }
-
-      return res.json({
-
-        success: true,
-
-        departments: result,
-
-      });
-
-    } catch (err) {
-
-      console.log(err);
-
-      return res.status(500).json({
-
-        success: false,
-
-        error: err.message,
-
-      });
-
-    }
-
-  }
-);
 /* =========================================================
    HOSPITAL EXECUTIVE ANALYTICS
 ========================================================= */
