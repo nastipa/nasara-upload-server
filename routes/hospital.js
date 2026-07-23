@@ -2380,7 +2380,27 @@ if (patientIds.length > 0) {
     bookings.length,
 
 };
-      const currentPatient =
+    const utilisation =
+Math.min(
+100,
+Math.round(
+(
+statistics.waiting +
+statistics.called +
+statistics.checked_in
+)
+/
+Math.max(statistics.total_today,1)
+*
+100
+)
+);
+
+const average_wait =
+statistics.waiting *
+(department.average_minutes || 10);
+      
+const currentPatient =
         bookings.find(
           b =>
             b.status ===
@@ -2442,7 +2462,8 @@ if (patientIds.length > 0) {
         },
 
         statistics,
-
+        utilisation,
+        average_wait,
         current_patient:
           currentPatient
             ? {
