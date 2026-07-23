@@ -1286,6 +1286,216 @@ const progress =
   }
 );
 /* =========================================================
+   HOSPITAL LIVE BOARD
+========================================================= */
+
+router.get(
+  "/live-board",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const today =
+        new Date()
+          .toISOString()
+          .split("T")[0];
+
+      // Hospital name
+      const {
+        data: hospital,
+      } =
+        await supabaseAdmin
+          .from("hospitals")
+          .select("name")
+          .eq("id", hospitalId)
+          .single();
+
+      // Departments
+      const {
+        data: departments,
+        error,
+      } =
+        await supabaseAdmin
+          .from(
+            "hospital_departments"
+          )
+          .select(`
+            id,
+            name,
+            average_minutes
+          `)
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .order(
+            "name",
+            {
+              ascending: true,
+            }
+          );
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      const board = [];
+
+      for (const dept of departments) {
+
+        // Currently serving
+        const {
+          data: current,
+        } =
+          await supabaseAdmin
+            .from(
+              "hospital_bookings"
+            )
+            .select(
+              "queue_number"
+            )
+            .eq(
+              "hospital_id",
+              hospitalId
+            )
+            .eq(
+              "department_id",
+              dept.id
+            )
+            .eq(
+              "booking_date",
+              today
+            )
+            .eq(
+              "status",
+              "called"
+            )
+            .order(
+              "created_at",
+              {
+                ascending: false,
+              }
+            )
+            .limit(1)
+            .maybeSingle();
+
+        // Waiting patients
+        const {
+          data: waitingPatients,
+        } =
+          await supabaseAdmin
+            .from(
+              "hospital_bookings"
+            )
+            .select(
+              "queue_number"
+            )
+            .eq(
+              "hospital_id",
+              hospitalId
+            )
+            .eq(
+              "department_id",
+              dept.id
+            )
+            .eq(
+              "booking_date",
+              today
+            )
+            .eq(
+              "status",
+              "waiting"
+            )
+            .order(
+              "priority_level",
+              {
+                ascending: true,
+              }
+            )
+            .order(
+              "queue_position",
+              {
+                ascending: true,
+              }
+            );
+
+        board.push({
+
+          department_id:
+            dept.id,
+
+          department_name:
+            dept.name,
+
+          current_serving:
+            current?.queue_number ??
+            null,
+
+          waiting:
+            waitingPatients?.length ??
+            0,
+
+          average_wait_minutes:
+            (
+              waitingPatients?.length ??
+              0
+            ) *
+            (
+              dept.average_minutes ??
+              10
+            ),
+
+          next_numbers:
+            (
+              waitingPatients ??
+              []
+            )
+              .slice(0, 3)
+              .map(
+                item =>
+                  item.queue_number
+              ),
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        hospital:
+          hospital?.name ??
+          "",
+
+        departments:
+          board,
+
+      });
+
+    } catch (err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message,
+
+      });
+
+    }
+  }
+);
+/* =========================================================
    GET LIVE QUEUE BOARD
 ========================================================= */
 
