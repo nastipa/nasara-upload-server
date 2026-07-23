@@ -5077,7 +5077,6 @@ try{
 
 const patientId = req.user.id;
 
-
 const { data, error } = await supabaseAdmin
   .from("hospital_notifications")
   .select(`
@@ -5091,8 +5090,6 @@ const { data, error } = await supabaseAdmin
     ascending: false,
   })
   .limit(50);
-
-
 
 if(error){
 
