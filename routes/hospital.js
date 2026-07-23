@@ -1496,6 +1496,126 @@ router.get(
   }
 );
 /* =========================================================
+   DEPARTMENT LIVE BOARD
+========================================================= */
+
+router.get(
+  "/department-live-board",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const today = new Date()
+        .toISOString()
+        .split("T")[0];
+
+      // Get all hospital departments
+      const {
+        data: departments,
+        error: deptError,
+      } = await supabaseAdmin
+        .from("hospital_departments")
+        .select("id, name")
+        .eq("hospital_id", hospitalId)
+        .order("name");
+
+      if (deptError) {
+        return res.status(400).json({
+          success: false,
+          error: deptError.message,
+        });
+      }
+
+      const boards = [];
+
+      for (const dept of departments || []) {
+        // Currently serving
+        const {
+          data: current,
+        } = await supabaseAdmin
+          .from("hospital_bookings")
+          .select("queue_number")
+          .eq("hospital_id", hospitalId)
+          .eq("department_id", dept.id)
+          .eq("booking_date", today)
+          .eq("status", "called")
+          .order("updated_at", {
+            ascending: false,
+          })
+          .limit(1)
+          .maybeSingle();
+
+        // Waiting patients
+        const {
+          data: waiting,
+        } = await supabaseAdmin
+          .from("hospital_bookings")
+          .select(
+            "queue_number,status,queue_position"
+          )
+          .eq("hospital_id", hospitalId)
+          .eq("department_id", dept.id)
+          .eq("booking_date", today)
+          .in("status", [
+            "waiting",
+            "called",
+            "checked_in",
+          ])
+          .order("queue_position");
+
+        const waitingList =
+          waiting || [];
+
+        boards.push({
+          department_id: dept.id,
+
+          department_name: dept.name,
+
+          current_serving:
+            current?.queue_number || null,
+
+          waiting_count:
+            waitingList.filter(
+              x => x.status === "waiting"
+            ).length,
+
+          checked_in_count:
+            waitingList.filter(
+              x => x.status === "checked_in"
+            ).length,
+
+          next_numbers:
+            waitingList
+              .filter(
+                x =>
+                  x.status === "waiting"
+              )
+              .slice(0, 5)
+              .map(
+                x => x.queue_number
+              ),
+        });
+      }
+
+      return res.json({
+        success: true,
+        boards,
+      });
+
+    } catch (err) {
+      console.log(err);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+/* =========================================================
    GET LIVE QUEUE BOARD
 ========================================================= */
 
