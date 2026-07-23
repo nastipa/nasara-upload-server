@@ -1111,13 +1111,21 @@ router.get(
         await supabaseAdmin
           .from("hospital_bookings")
           .select(`
-            *,
-            hospital_departments(
-              id,
-              name,
-              average_minutes
-            )
-          `)
+  *,
+  hospital_departments!hospital_bookings_department_id_fkey(
+    id,
+    name,
+    average_minutes
+  ),
+  next_department:hospital_departments!hospital_bookings_next_department_id_fkey(
+    id,
+    name
+  ),
+  patient_records(
+    id,
+    full_name
+  )
+`)
           .eq("patient_id", patientId)
           .eq("booking_date", today)
           .neq("status", "completed")
@@ -1145,7 +1153,10 @@ router.get(
           .eq("hospital_id", booking.hospital_id)
           .eq("department_id", booking.department_id)
           .eq("booking_date", today)
-          .eq("status", "called")
+          .in("status", [
+  "called",
+  "checked_in"
+])
           .order("created_at", {
             ascending: false,
           })
@@ -1185,11 +1196,14 @@ const { count: totalPatients } =
 
 const total = totalPatients || 1;
 
+const averageMinutes =
+  booking.hospital_departments
+    ?.average_minutes || 10;
+
 const estimatedWait =
-  ahead *
-  (
-    booking.hospital_departments
-      ?.average_minutes || 10
+  Math.max(
+    0,
+    ahead * averageMinutes
   );
 
 // Percentage through the queue
@@ -1201,24 +1215,62 @@ const progress =
       return res.json({
         success: true,
         progress: {
-          current_serving:
-            currentServing?.queue_number || null,
 
-          your_number:
-            booking.queue_number,
+  booking_id:
+    booking.id,
 
-          people_ahead:
-            ahead,
+  patient_name:
+    booking.patient_records?.full_name ||
+    "Unknown Patient",
 
-          estimated_wait_minutes:
-            estimatedWait,
+  hospital_id:
+    booking.hospital_id,
 
-          progress_percent:
-            progress,
+  department_id:
+    booking.department_id,
 
-          status:
-            booking.status,
-        },
+  department_name:
+    booking.hospital_departments?.name,
+
+  current_serving:
+    currentServing?.queue_number || null,
+
+  your_number:
+    booking.queue_number,
+
+  booking_code:
+    booking.booking_code,
+
+  people_ahead:
+    ahead,
+
+  estimated_wait_minutes:
+    estimatedWait,
+
+  average_minutes:
+    averageMinutes,
+
+  progress_percent:
+    progress,
+
+  total_patients:
+    total,
+
+  status:
+    booking.status,
+
+  checked_in:
+    booking.checked_in,
+
+  booking_source:
+    booking.patient_record_id
+      ? "online"
+      : "walk_in",
+
+  next_department:
+    booking.next_department || null,
+
+},
       });
 
     } catch (err) {
@@ -2150,6 +2202,17 @@ router.get(
   hospital_departments!hospital_bookings_department_id_fkey(
     id,
     name
+  ),
+  patient_records(
+    id,
+    full_name,
+    phone,
+    gender,
+    date_of_birth
+  ),
+  next_department:hospital_departments!hospital_bookings_next_department_id_fkey(
+    id,
+    name
   )
 `)
       .eq("hospital_id", hospitalId)
@@ -2167,10 +2230,39 @@ router.get(
         error: error.message,
       });
     }
+    const queue =
+  (data || []).map((booking) => ({
 
+    ...booking,
+
+    patient_name:
+      booking.patient_records?.full_name ||
+      "Unknown Patient",
+
+    patient_phone:
+      booking.patient_records?.phone || null,
+
+    patient_gender:
+      booking.patient_records?.gender || null,
+
+    patient_dob:
+      booking.patient_records?.date_of_birth || null,
+
+    booking_source:
+      booking.patient_record_id
+        ? "online"
+        : "walk_in",
+
+    checked_in:
+      booking.checked_in === true,
+
+    next_department_name:
+      booking.next_department?.name || null,
+
+  }));
     return res.json({
       success: true,
-      queue: data || [],
+      queue,
     });
 
   } catch (err) {
