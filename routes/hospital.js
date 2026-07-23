@@ -3308,6 +3308,56 @@ router.post(
   }
 );
 /* =========================================================
+   GET HOSPITAL DEPARTMENTS
+========================================================= */
+
+router.get(
+  "/departments",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .select("*")
+          .eq("hospital_id", hospitalId)
+          .eq("is_active", true)
+          .order("name");
+
+
+      if (error) {
+        return res.status(400).json({
+          success:false,
+          error:error.message
+        });
+      }
+
+
+      return res.json({
+        success:true,
+        departments:data || []
+      });
+
+
+    } catch(err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+        success:false,
+        error:err.message
+      });
+
+    }
+  }
+);
+/* =========================================================
    GET TODAY'S CHECKED-IN PATIENTS
 ========================================================= */
 
