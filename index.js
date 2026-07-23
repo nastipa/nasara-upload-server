@@ -566,7 +566,6 @@ const temporaryPassword =
 });
 
 /* ================= CREATE HUB360 USER HELPERS ================= */
-
 function generateLoginCode(role) {
   let prefix = "EMP";
 
@@ -633,6 +632,7 @@ app.post("/create-hub360-user", async (req, res) => {
     const {
       email,
       full_name,
+      phone,
       role,
       institution_id,
       group_id,
@@ -732,6 +732,7 @@ const loginPin = generatePin();
   auth_user_id: userId,
   email,
   full_name,
+  phone,
   role,
   institution_id,
 
@@ -768,7 +769,6 @@ const loginPin = generatePin();
       }
     }
 
-    
     return res.json({
   success: true,
   user_id: userId,
