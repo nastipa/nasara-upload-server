@@ -2523,6 +2523,161 @@ const currentPatient =
 );
 
 /* =========================================================
+   DEPARTMENT UTILISATION
+========================================================= */
+
+router.get(
+  "/department-utilisation",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const today =
+        new Date()
+          .toISOString()
+          .split("T")[0];
+
+      const {
+        data: departments,
+        error: depError,
+      } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .select(`
+            id,
+            name,
+            average_minutes
+          `)
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .eq(
+            "is_active",
+            true
+          )
+          .order("name");
+
+      if (depError) {
+
+        return res.status(400).json({
+          success:false,
+          error:depError.message,
+        });
+
+      }
+
+      const utilisation = [];
+
+      for (const dept of departments || []) {
+
+        const {
+          data: bookings,
+          error,
+        } =
+          await supabaseAdmin
+            .from("hospital_bookings")
+            .select(`
+              status,
+              priority
+            `)
+            .eq(
+              "hospital_id",
+              hospitalId
+            )
+            .eq(
+              "department_id",
+              dept.id
+            )
+            .eq(
+              "booking_date",
+              today
+            );
+
+        if (error) continue;
+
+        utilisation.push({
+
+          department_id:
+            dept.id,
+
+          department_name:
+            dept.name,
+
+          waiting:
+            bookings.filter(
+              b =>
+                b.status === "waiting"
+            ).length,
+
+          called:
+            bookings.filter(
+              b =>
+                b.status === "called"
+            ).length,
+
+          checked_in:
+            bookings.filter(
+              b =>
+                b.status === "checked_in"
+            ).length,
+
+          completed:
+            bookings.filter(
+              b =>
+                b.status === "completed"
+            ).length,
+
+          emergency:
+            bookings.filter(
+              b =>
+                b.priority ===
+                "emergency"
+            ).length,
+
+          urgent:
+            bookings.filter(
+              b =>
+                b.priority ===
+                "urgent"
+            ).length,
+
+          total:
+            bookings.length,
+
+        });
+
+      }
+
+      return res.json({
+
+        success:true,
+
+        departments:
+          utilisation,
+
+      });
+
+    } catch(err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message,
+
+      });
+
+    }
+  }
+);
+/* =========================================================
    HOSPITAL EXECUTIVE ANALYTICS
 ========================================================= */
 
