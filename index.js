@@ -638,13 +638,10 @@ app.post("/create-hub360-user", async (req, res) => {
       group_id,
     } = req.body;
 
-    const temporaryPassword =
-      Math.random().toString(36).slice(-8) +
-      Math.floor(Math.random() * 100);
-
-      const loginCode = generateLoginCode(role);
+    const loginCode = generateLoginCode(role);
 const loginPin = generatePin();
 
+const temporaryPassword = loginPin;
     if (
       !email ||
       !full_name ||
