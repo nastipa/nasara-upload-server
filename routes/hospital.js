@@ -722,27 +722,21 @@ if (!department_id) {
 
 }
 
-const {
-  data: department,
-  error: depError
-} =
-await supabaseAdmin
-  .from("hospital_departments")
-  .select("*")
-  .eq("id", department_id)
-  .eq("hospital_id", hospital_id)
-  .eq("is_active", true)
-  .maybeSingle();
+const { data: department, error: depError } =
+  await supabaseAdmin
+    .from("hospital_departments")
+    .select("*")
+    .eq("hospital_id", hospital_id)
+    .eq("id", department_id)
+    .eq("is_active", true)
+    .maybeSingle();
 
 if (depError || !department) {
-
   return res.status(400).json({
     success: false,
-    error: "Department not found."
+    error: "Department not found.",
   });
-
 }
-
 
 /* ==============================
    COUNT QUEUE NUMBER
@@ -763,7 +757,7 @@ await supabaseAdmin
   )
   .eq(
     "department_id",
-    department.id
+    department_id
   )
   .eq(
     "booking_date",
@@ -799,11 +793,8 @@ const bookingCode =
 ============================== */
 
 const estimatedWait =
-  queuePosition *
-  (
-    department.average_minutes || 10
-  );
-
+queuePosition *
+(department.average_minutes || 10);
 
 
 /* ==============================
@@ -924,7 +915,7 @@ await supabaseAdmin
       bookingPatientRecordId,
 
 
-    department_id: department.id,
+    department_id: department_id,
 
 
     booking_date:
@@ -981,7 +972,7 @@ const { count: duplicateQueue } =
       head: true,
     })
     .eq("hospital_id", hospital_id)
-    .eq("department_id", department.id)
+    .eq("department_id", department_id)
     .eq("booking_date", bookingDate)
     .eq("queue_position", queuePosition);
 
@@ -1017,7 +1008,7 @@ if (queuePatientId) {
 
 
       message:
-      `You have joined the queue. Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`
+      `You have joined the ${department.name} queue. Your queue number is ${queueNumber}. Estimated waiting time is ${estimatedWait} minutes.`
 
     });
 
@@ -1051,14 +1042,13 @@ await savePatientJourney({
 
   patient_record_id: bookingPatientRecordId,
 
- department_id: department.id,
+ department_id: department_id,
 
   event_type: "joined_queue",
 
   action: "Joined Queue",
 
   notes: `Patient joined ${department.name} queue`,
-
   performed_by: isHospitalAdmin
     ? req.user.id
     : queuePatientId,
@@ -2510,7 +2500,7 @@ if (patientIds.length > 0) {
   }
 );
 /* =========================================================
-   ALL DEPARTMENTS DASHBOARD
+   ALL DEPARTMENT DASHBOARD
 ========================================================= */
 
 router.get(
@@ -2531,99 +2521,76 @@ router.get(
 
       const {
         data: departments,
-        error,
-      } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .select(`
-            id,
-            name
-          `)
-          .eq(
-            "hospital_id",
-            hospitalId
-          )
-          .eq(
-            "is_active",
-            true
-          );
+        error: departmentError,
+      } = await supabaseAdmin
+        .from("hospital_departments")
+        .select(`
+          id,
+          name
+        `)
+        .eq("hospital_id", hospitalId)
+        .eq("is_active", true)
+        .order("name");
 
-      if (error) {
+      if (departmentError) {
 
         return res.status(400).json({
-          error: error.message,
+          success: false,
+          error: departmentError.message,
         });
 
       }
 
       const result = [];
 
-      for (const department of departments || []) {
+      for (const dept of departments || []) {
 
         const {
           data: bookings,
-        } =
-          await supabaseAdmin
-            .from("hospital_bookings")
-            .select(`
-              status,
-              priority
-            `)
-            .eq(
-              "hospital_id",
-              hospitalId
-            )
-            .eq(
-              "department_id",
-              department.id
-            )
-            .eq(
-              "booking_date",
-              today
-            );
+          error,
+        } = await supabaseAdmin
+          .from("hospital_bookings")
+          .select(`
+            status,
+            priority
+          `)
+          .eq("hospital_id", hospitalId)
+          .eq("department_id", dept.id)
+          .eq("booking_date", today);
+
+        if (error) continue;
 
         result.push({
 
-          department_id:
-            department.id,
+          department_id: dept.id,
 
-          department_name:
-            department.name,
+          department_name: dept.name,
 
           waiting:
-            bookings?.filter(
-              b =>
-                b.status ===
-                "waiting"
-            ).length || 0,
+            bookings.filter(
+              b => b.status === "waiting"
+            ).length,
 
           called:
-            bookings?.filter(
-              b =>
-                b.status ===
-                "called"
-            ).length || 0,
+            bookings.filter(
+              b => b.status === "called"
+            ).length,
 
           checked_in:
-            bookings?.filter(
-              b =>
-                b.status ===
-                "checked_in"
-            ).length || 0,
+            bookings.filter(
+              b => b.status === "checked_in"
+            ).length,
 
           completed:
-            bookings?.filter(
-              b =>
-                b.status ===
-                "completed"
-            ).length || 0,
+            bookings.filter(
+              b => b.status === "completed"
+            ).length,
 
           emergency:
-            bookings?.filter(
+            bookings.filter(
               b =>
-                b.priority ===
-                "emergency"
-            ).length || 0,
+                b.priority === "emergency"
+            ).length,
 
         });
 
@@ -2639,7 +2606,11 @@ router.get(
 
     } catch (err) {
 
+      console.log(err);
+
       return res.status(500).json({
+
+        success: false,
 
         error: err.message,
 
@@ -3186,6 +3157,22 @@ if ((activeBookings || 0) > 0) {
       "This department cannot be deleted because patients are still assigned to it.",
   });
 
+}
+     const { count: staffCount } =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select("*", {
+  count: "exact",
+  head: true,
+})
+.eq("department_id", id)
+.eq("active", true);
+
+if ((staffCount || 0) > 0) {
+  return res.status(400).json({
+    success:false,
+    error:"Department still has active staff."
+  });
 }
       const { data, error } =
         await supabaseAdmin
@@ -3884,7 +3871,7 @@ hospitalAdminAuth, async (req, res) => {
       .from("hospital_bookings")
       .update({
        checked_in: true,
-status: "checked_in",
+status: "waiting",
 arrived_at: new Date().toISOString(),
       })
       .eq("id", booking.id)
@@ -4065,11 +4052,16 @@ const { data: lastBooking } =
 
 const queuePosition =
   (lastBooking?.queue_position || 0) + 1;
-const queueNumber =
-  `${department.name
-    .substring(0, 3)
-    .toUpperCase()}-${String(queuePosition).padStart(3, "0")}`;
+const {
+  data: selectedDepartment,
+} = await supabaseAdmin
+  .from("hospital_departments")
+  .select("name")
+  .eq("id", next_department_id)
+  .single();
 
+const queueNumber =
+`${selectedDepartment.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
 // Update booking
 const {
   data: updated,
@@ -5086,24 +5078,20 @@ try{
 const patientId = req.user.id;
 
 
-const {data,error}=await supabaseAdmin
-.from("hospital_notifications")
-.select(`
- *,
- hospital_bookings(
-   queue_number
- )
-`)
-.eq(
-"patient_id",
-patientId
-)
-.order(
-"created_at",
-{
- ascending:false
-}
-);
+const { data, error } = await supabaseAdmin
+  .from("hospital_notifications")
+  .select(`
+    *,
+    hospital_bookings(
+      queue_number
+    )
+  `)
+  .eq("patient_id", patientId)
+  .order("created_at", {
+    ascending: false,
+  })
+  .limit(50);
+
 
 
 if(error){
@@ -5834,7 +5822,7 @@ await supabaseAdmin
     error: "Hospital account is inactive.",
   });
 }
-
+      
         return res.status(401).json({
 
           success: false,
@@ -6240,7 +6228,7 @@ router.post(
             played: true,
             played_at: new Date().toISOString(),
           })
-          .eq("id", id)
+          .eq("hospital_id", hospitalId)
           .select()
           .single();
 
