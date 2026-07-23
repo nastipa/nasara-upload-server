@@ -1434,10 +1434,10 @@ router.get("/my-queue", authenticate, async (req, res) => {
    phone,
    address
  ),
- hospital_departments (
-   id,
-   name
- )
+ hospital_departments!hospital_bookings_department_id_fkey (
+  id,
+  name
+)
 `)
       .eq("patient_id", patientId)
       .eq("booking_date", today)
