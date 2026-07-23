@@ -444,6 +444,7 @@ const temporaryPassword =
   }
 });
 /* ================= CREATE HUB360 ADMIN ================= */
+
 app.post("/create-hub360-admin", async (req, res) => {
   try {
     const {
@@ -563,6 +564,69 @@ const temporaryPassword =
     });
   }
 });
+
+/* ================= CREATE HUB360 USER HELPERS ================= */
+
+function generateLoginCode(role) {
+  let prefix = "EMP";
+
+  switch (role) {
+    case "student":
+      prefix = "STD";
+      break;
+
+    case "teacher":
+      prefix = "TCH";
+      break;
+
+    case "administrator":
+      prefix = "ADM";
+      break;
+
+    case "data_entry_officer":
+      prefix = "DTE";
+      break;
+
+    case "doctor":
+      prefix = "DOC";
+      break;
+
+    case "nurse":
+      prefix = "NUR";
+      break;
+
+    case "lecturer":
+      prefix = "LEC";
+      break;
+
+    case "parent":
+      prefix = "PAR";
+      break;
+
+    case "accountant":
+      prefix = "ACC";
+      break;
+
+    case "secretary":
+      prefix = "SEC";
+      break;
+
+    case "hr_manager":
+      prefix = "HRM";
+      break;
+  }
+
+  return (
+    prefix +
+    Date.now().toString().slice(-8)
+  );
+}
+
+function generatePin() {
+  return Math.floor(
+    1000 + Math.random() * 9000
+  ).toString();
+}
 /* ================= CREATE HUB360 USER ================= */
 app.post("/create-hub360-user", async (req, res) => {
   try {
@@ -577,6 +641,9 @@ app.post("/create-hub360-user", async (req, res) => {
     const temporaryPassword =
       Math.random().toString(36).slice(-8) +
       Math.floor(Math.random() * 100);
+
+      const loginCode = generateLoginCode(role);
+const loginPin = generatePin();
 
     if (
       !email ||
@@ -661,18 +728,21 @@ app.post("/create-hub360-user", async (req, res) => {
         .eq("auth_user_id", userId)
         .maybeSingle();
 
-    const payload = {
-      auth_user_id: userId,
-      email,
-      full_name,
-      role,
-      institution_id,
-      group_id:
-        role === "student"
-          ? group_id
-          : null,
-    };
+   const payload = {
+  auth_user_id: userId,
+  email,
+  full_name,
+  role,
+  institution_id,
 
+  login_code: loginCode,
+  login_pin: loginPin,
+
+  group_id:
+    role === "student"
+      ? group_id
+      : null,
+};
     if (existingProfile) {
       const { error } =
         await supabaseAdmin
@@ -698,50 +768,18 @@ app.post("/create-hub360-user", async (req, res) => {
       }
     }
 
-    // Roles that should become Hub360 admins
-    const adminRoles = [
-      "administrator",
-      "hr_manager",
-      "accountant",
-      "secretary",
-      "data_entry_officer",
-    ];
-
-    if (adminRoles.includes(role)) {
-      const { data: existingAdmin } =
-        await supabaseAdmin
-          .from("hub360_admins")
-          .select("id")
-          .eq("auth_user_id", userId)
-          .maybeSingle();
-
-      if (!existingAdmin) {
-        const { error } =
-          await supabaseAdmin
-            .from("hub360_admins")
-            .insert({
-              auth_user_id: userId,
-              email,
-              full_name,
-              institution_id,
-              role,
-            });
-
-        if (error) {
-          return res.status(400).json({
-            error: error.message,
-          });
-        }
-      }
-    }
-
+    
     return res.json({
-      success: true,
-      user_id: userId,
-      temporary_password:
-        temporaryPassword,
-      existing_user: existingUser,
-    });
+  success: true,
+  user_id: userId,
+
+  login_code: loginCode,
+  login_pin: loginPin,
+
+  temporary_password: temporaryPassword,
+
+  existing_user: existingUser,
+});
   } catch (err) {
     console.log(err);
 
