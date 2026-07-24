@@ -5603,6 +5603,45 @@ await supabaseAdmin
   }
 );
 /* =========================================================
+   HOSPITAL DEPARTMENT STAFF AUTH
+========================================================= */
+async function hospitalDepartmentStaffAuth(
+  req,
+  res,
+  next
+) {
+  try {
+    const userId = req.user.id;
+
+    const { data, error } =
+      await supabaseAdmin
+        .from("hospital_department_staff")
+        .select("*")
+        .eq("user_id", userId)
+        .eq("active", true)
+        .maybeSingle();
+
+    if (error || !data) {
+      return res.status(403).json({
+        success: false,
+        error: "Department staff access denied.",
+      });
+    }
+
+    req.staff = data;
+
+    next();
+
+  } catch (err) {
+
+    return res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+
+  }
+}
+/* =========================================================
    CREATE DEPARTMENT STAFF
 ========================================================= */
 
