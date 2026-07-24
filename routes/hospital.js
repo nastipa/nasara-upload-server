@@ -2087,246 +2087,407 @@ router.get(
       const hospitalId =
         req.hospitalAdmin.hospital_id;
 
-      const today = new Date()
-        .toISOString()
-        .split("T")[0];
+      const today =
+        req.query.date ||
+        new Date()
+          .toISOString()
+          .split("T")[0];
 
-      const { data: bookings, error } =
+      /* ------------------------------
+         BOOKINGS TODAY
+      ------------------------------ */
+
+      const {
+        data: bookings,
+        error: bookingError,
+      } =
         await supabaseAdmin
           .from("hospital_bookings")
           .select(`
             id,
             status,
+            priority,
             created_at,
             called_at,
+            arrived_at,
             completed_at,
             department_id,
             hospital_departments(
+              id,
               name
             )
           `)
-          .eq("hospital_id", hospitalId)
-          .eq("booking_date", today);
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .eq(
+            "booking_date",
+            today
+          );
 
-      if (error) {
+      if (bookingError) {
         return res.status(400).json({
           success: false,
-          error: error.message,
+          error:
+            bookingError.message,
         });
       }
 
-      const list = bookings || [];
-
-      const totalPatients = list.length;
-
-      const completed =
-        list.filter(
-          b => b.status === "completed"
-        ).length;
-
       const waiting =
-        list.filter(
-          b => b.status === "waiting"
+        bookings.filter(
+          b =>
+            b.status ===
+            "waiting"
         ).length;
 
       const called =
-        list.filter(
-          b => b.status === "called"
+        bookings.filter(
+          b =>
+            b.status ===
+            "called"
         ).length;
 
       const checkedIn =
-        list.filter(
-          b => b.status === "checked_in"
+        bookings.filter(
+          b =>
+            b.status ===
+            "checked_in"
+        ).length;
+
+      const completed =
+        bookings.filter(
+          b =>
+            b.status ===
+            "completed"
         ).length;
 
       const cancelled =
-        list.filter(
-          b => b.status === "cancelled"
+        bookings.filter(
+          b =>
+            b.status ===
+            "cancelled"
         ).length;
 
       const noShow =
-        list.filter(
-          b => b.status === "no_show"
+        bookings.filter(
+          b =>
+            b.status ===
+            "no_show"
         ).length;
 
-      // ==========================
-      // Average waiting time
-      // ==========================
+      const emergency =
+        bookings.filter(
+          b =>
+            b.priority ===
+            "emergency"
+        ).length;
 
-      let waitTotal = 0;
-      let waitCount = 0;
+      const urgent =
+        bookings.filter(
+          b =>
+            b.priority ===
+            "urgent"
+        ).length;
 
-      list.forEach(item => {
+      const totalPatients =
+        bookings.length;
 
-        if (
-          item.called_at &&
-          item.created_at
-        ) {
+      /* ------------------------------
+         ADMISSIONS
+      ------------------------------ */
 
-          const mins =
-            (
-              new Date(item.called_at) -
-              new Date(item.created_at)
-            ) /
-            60000;
+      const {
+        data: admissions,
+        error:
+          admissionError,
+      } =
+        await supabaseAdmin
+          .from(
+            "hospital_admissions"
+          )
+          .select(`
+            admitted_at,
+            discharged_at,
+            status
+          `)
+          .eq(
+            "hospital_id",
+            hospitalId
+          );
 
-          waitTotal += mins;
-          waitCount++;
+      if (admissionError) {
+        return res.status(400).json({
+          success: false,
+          error:
+            admissionError.message,
+        });
+      }
 
-        }
-
-      });
-
-      const averageWait =
-        waitCount > 0
-          ? Math.round(waitTotal / waitCount)
-          : 0;
-
-      // ==========================
-      // Peak Hour
-      // ==========================
-
-      const hours = {};
-
-      list.forEach(item => {
-
-        if (!item.created_at) return;
-
-        const hour =
-          new Date(item.created_at)
-            .getHours();
-
-        hours[hour] =
-          (hours[hour] || 0) + 1;
-
-      });
-
-      let peakHour = null;
-      let peakCount = 0;
-
-      Object.keys(hours).forEach(hour => {
-
-        if (hours[hour] > peakCount) {
-
-          peakCount = hours[hour];
-          peakHour = hour;
-
-        }
-
-      });
-
-      // ==========================
-      // Busiest Department
-      // ==========================
-
-      const departments = {};
-
-      list.forEach(item => {
-
-        const name =
-          item.hospital_departments
-            ?.name ||
-          "Unknown";
-
-        departments[name] =
-          (departments[name] || 0) + 1;
-
-      });
-
-      let busiestDepartment = null;
-      let busiestCount = 0;
-
-      Object.keys(departments).forEach(
-        dept => {
-
-          if (
-            departments[dept] >
-            busiestCount
-          ) {
-
-            busiestDepartment = dept;
-            busiestCount =
-              departments[dept];
-
-          }
-
-        }
-      );
-
-      const cancellationRate =
-        totalPatients > 0
-          ? Number(
-              (
-                (cancelled /
-                  totalPatients) *
-                100
-              ).toFixed(1)
+      const admittedToday =
+        admissions.filter(
+          a =>
+            a.admitted_at &&
+            a.admitted_at.startsWith(
+              today
             )
-          : 0;
+        ).length;
 
-      const noShowRate =
-        totalPatients > 0
-          ? Number(
-              (
-                (noShow /
-                  totalPatients) *
-                100
-              ).toFixed(1)
+      const dischargedToday =
+        admissions.filter(
+          a =>
+            a.discharged_at &&
+            a.discharged_at.startsWith(
+              today
             )
-          : 0;
+        ).length;
 
-      return res.json({
-        success: true,
-        analytics: {
+      const currentlyAdmitted =
+        admissions.filter(
+          a =>
+            a.status ===
+            "admitted"
+        ).length;
+/* ------------------------------
+   AVERAGE WAITING TIME
+------------------------------ */
 
-          total_patients:
-            totalPatients,
+let waitingTotal = 0;
+let waitingCount = 0;
 
-          patients_served_today:
-            completed,
+bookings.forEach((booking) => {
 
-          waiting,
+  if (
+    booking.called_at &&
+    booking.created_at
+  ) {
 
-          called,
+    const minutes =
+      (
+        new Date(
+          booking.called_at
+        ) -
+        new Date(
+          booking.created_at
+        )
+      ) /
+      60000;
 
-          checked_in:
-            checkedIn,
+    waitingTotal += minutes;
+    waitingCount++;
 
-          completed,
+  }
 
-          cancelled,
+});
 
-          no_show:
-            noShow,
+const averageWaitingTime =
+  waitingCount > 0
+    ? Math.round(
+        waitingTotal /
+          waitingCount
+      )
+    : 0;
 
-          average_wait_minutes:
-            averageWait,
+/* ------------------------------
+   AVERAGE CONSULTATION TIME
+------------------------------ */
 
-          busiest_department:
-            busiestDepartment,
+let consultationTotal = 0;
+let consultationCount = 0;
 
-          busiest_department_count:
-            busiestCount,
+bookings.forEach((booking) => {
 
-          peak_hour:
-            peakHour === null
-              ? null
-              : `${String(
-                  peakHour
-                ).padStart(
-                  2,
-                  "0"
-                )}:00`,
+  if (
+    booking.arrived_at &&
+    booking.completed_at
+  ) {
 
-          cancellation_rate:
-            cancellationRate,
+    const minutes =
+      (
+        new Date(
+          booking.completed_at
+        ) -
+        new Date(
+          booking.arrived_at
+        )
+      ) /
+      60000;
 
-          no_show_rate:
-            noShowRate,
+    consultationTotal += minutes;
+    consultationCount++;
 
-        },
-      });
+  }
 
+});
+
+const averageConsultationTime =
+  consultationCount > 0
+    ? Math.round(
+        consultationTotal /
+          consultationCount
+      )
+    : 0;
+
+/* ------------------------------
+   DEPARTMENT SUMMARY
+------------------------------ */
+
+const departmentMap = {};
+
+bookings.forEach((booking) => {
+
+  const id =
+    booking.department_id;
+
+  const name =
+    booking
+      .hospital_departments
+      ?.name ||
+    "Unknown";
+
+  if (!departmentMap[id]) {
+
+    departmentMap[id] = {
+      department_id: id,
+      department_name: name,
+      patients: 0,
+      waiting: 0,
+      called: 0,
+      checked_in: 0,
+      completed: 0,
+    };
+
+  }
+
+  departmentMap[id]
+    .patients++;
+
+  if (
+    booking.status ===
+    "waiting"
+  ) {
+    departmentMap[id]
+      .waiting++;
+  }
+
+  if (
+    booking.status ===
+    "called"
+  ) {
+    departmentMap[id]
+      .called++;
+  }
+
+  if (
+    booking.status ===
+    "checked_in"
+  ) {
+    departmentMap[id]
+      .checked_in++;
+  }
+
+  if (
+    booking.status ===
+    "completed"
+  ) {
+    departmentMap[id]
+      .completed++;
+  }
+
+});
+
+const departments =
+  Object.values(
+    departmentMap
+  );
+
+/* ------------------------------
+   HOURLY ARRIVALS
+------------------------------ */
+
+const hourlyMap = {};
+
+bookings.forEach((booking) => {
+
+  const hour =
+    new Date(
+      booking.created_at
+    ).getHours();
+
+  const label =
+    `${hour
+      .toString()
+      .padStart(2, "0")}:00`;
+
+  hourlyMap[label] =
+    (hourlyMap[label] || 0) +
+    1;
+
+});
+
+const hourly =
+  Object.keys(hourlyMap)
+    .sort()
+    .map((hour) => ({
+      hour,
+      patients:
+        hourlyMap[hour],
+    }));
+
+/* ------------------------------
+   RESPONSE
+------------------------------ */
+
+return res.json({
+  success: true,
+
+  analytics: {
+
+    date: today,
+
+    total_patients:
+      totalPatients,
+
+    waiting,
+
+    called,
+
+    checked_in:
+      checkedIn,
+
+    completed,
+
+    cancelled,
+
+    no_show:
+      noShow,
+
+    emergency,
+
+    urgent,
+
+    admitted_today:
+      admittedToday,
+
+    discharged_today:
+      dischargedToday,
+
+    currently_admitted:
+      currentlyAdmitted,
+
+    average_waiting_time:
+      averageWaitingTime,
+
+    average_consultation_time:
+      averageConsultationTime,
+
+    departments,
+
+    hourly,
+
+  },
+
+});
     } catch (err) {
 
       console.log(err);
