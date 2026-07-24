@@ -2098,33 +2098,27 @@ router.get(
       ------------------------------ */
 
       const {
-        data: bookings,
-        error: bookingError,
-      } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select(`
-            id,
-            status,
-            priority,
-            created_at,
-            called_at,
-            arrived_at,
-            completed_at,
-            department_id,
-            hospital_departments(
-              id,
-              name
-            )
-          `)
-          .eq(
-            "hospital_id",
-            hospitalId
-          )
-          .eq(
-            "booking_date",
-            today
-          );
+  data: bookings,
+  error: bookingError,
+} =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select(`
+      id,
+      status,
+      priority,
+      created_at,
+      called_at,
+      arrived_at,
+      completed_at,
+      department_id,
+      hospital_departments!hospital_bookings_department_id_fkey(
+        id,
+        name
+      )
+    `)
+    .eq("hospital_id", hospitalId)
+    .eq("booking_date", today);
 
       if (bookingError) {
         return res.status(400).json({
@@ -2466,13 +2460,11 @@ return res.json({
 
     urgent,
 
-    admitted_today:
-      admittedToday,
-
-    discharged_today:
-      dischargedToday,
-
-    currently_admitted:
+    admitted: admittedToday,
+discharged: dischargedToday,
+patients_served_today: completed,
+    
+currently_admitted:
       currentlyAdmitted,
 
     average_waiting_time:

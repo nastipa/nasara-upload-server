@@ -627,21 +627,24 @@ function generatePin() {
   ).toString();
 }
 /* ================= CREATE HUB360 USER ================= */
+
 app.post("/create-hub360-user", async (req, res) => {
   try {
     const {
       email,
       full_name,
-      phone,
       role,
       institution_id,
       group_id,
+      phone,
+      employee_or_student_id,
+      department_id,
     } = req.body;
 
-    const loginCode = generateLoginCode(role);
-const loginPin = generatePin();
+    const temporaryPassword =
+      Math.random().toString(36).slice(-8) +
+      Math.floor(Math.random() * 100);
 
-const temporaryPassword = loginPin;
     if (
       !email ||
       !full_name ||
@@ -653,14 +656,14 @@ const temporaryPassword = loginPin;
       });
     }
 
+    const loginCode = generateLoginCode(role);
+    const loginPin = generatePin();
+
     let userId;
     let existingUser = false;
 
-    // Create Auth user
-    const {
-      data: authData,
-      error: authError,
-    } =
+    // Create auth user
+    const { data: authData, error: authError } =
       await supabaseAdmin.auth.admin.createUser({
         email,
         password: temporaryPassword,
@@ -671,10 +674,9 @@ const temporaryPassword = loginPin;
       userId = authData.user.id;
     }
 
-    // Existing Auth user
+    // User already exists
     if (authError) {
-      const msg =
-        authError.message?.toLowerCase() || "";
+      const msg = authError.message?.toLowerCase() || "";
 
       if (
         msg.includes("already") ||
@@ -682,10 +684,7 @@ const temporaryPassword = loginPin;
       ) {
         existingUser = true;
 
-        const {
-          data,
-          error,
-        } =
+        const { data, error } =
           await supabaseAdmin.auth.admin.listUsers({
             page: 1,
             perPage: 1000,
@@ -705,7 +704,7 @@ const temporaryPassword = loginPin;
 
         if (!found) {
           return res.status(400).json({
-            error: "User exists but not found",
+            error: "User exists but cannot be located",
           });
         }
 
@@ -717,66 +716,65 @@ const temporaryPassword = loginPin;
       }
     }
 
-    // Upsert hub_users
-    const { data: existingProfile } =
+    // Check existing Hub360 user
+    const { data: existingUserProfile } =
       await supabaseAdmin
         .from("hub_users")
         .select("id")
         .eq("auth_user_id", userId)
         .maybeSingle();
 
-   const payload = {
-  auth_user_id: userId,
-  email,
-  full_name,
-  phone,
-  role,
-  institution_id,
+    if (existingUserProfile) {
+      return res.status(400).json({
+        error: "User already exists."
+      });
+    }
 
-  login_code: loginCode,
-  login_pin: loginPin,
+    // Insert Hub360 user
+    const { error: insertError } =
+      await supabaseAdmin
+        .from("hub_users")
+        .insert({
+          auth_user_id: userId,
+          email,
+          full_name,
+          role,
+          institution_id,
 
-  group_id:
-    role === "student"
-      ? group_id
-      : null,
-};
-    if (existingProfile) {
-      const { error } =
-        await supabaseAdmin
-          .from("hub_users")
-          .update(payload)
-          .eq("auth_user_id", userId);
+          phone: phone || null,
+          employee_or_student_id:
+            employee_or_student_id || null,
 
-      if (error) {
-        return res.status(400).json({
-          error: error.message,
+          department_id:
+            department_id || null,
+
+          group_id:
+            role === "student"
+              ? group_id
+              : null,
+
+          login_code: loginCode,
+          login_pin: loginPin,
+
+          active: true,
+          pin_changed: false,
         });
-      }
-    } else {
-      const { error } =
-        await supabaseAdmin
-          .from("hub_users")
-          .insert(payload);
 
-      if (error) {
-        return res.status(400).json({
-          error: error.message,
-        });
-      }
+    if (insertError) {
+      return res.status(400).json({
+        error: insertError.message,
+      });
     }
 
     return res.json({
-  success: true,
-  user_id: userId,
+      success: true,
+      user_id: userId,
+      login_code: loginCode,
+      login_pin: loginPin,
+      temporary_password: temporaryPassword,
+      existing_user: existingUser,
+    });
 
-  login_code: loginCode,
-  login_pin: loginPin,
-
-  temporary_password: temporaryPassword,
-
-  existing_user: existingUser,
-});
   } catch (err) {
     console.log(err);
 
