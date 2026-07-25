@@ -1121,36 +1121,47 @@ router.get(
   async (req, res) => {
     try {
 
-      const patientId = req.user.id;
-console.log("LIVE QUEUE USER:", patientId);
-      const today = new Date()
-        .toISOString()
-        .split("T")[0];
+      const userId = req.user.id;
 
-      // Patient's active booking
-      const { data: booking, error: bookingError } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select(`
-  *,
-  hospital_departments!hospital_bookings_department_id_fkey(
-    id,
-    name,
-    average_minutes
-  ),
-  next_department:hospital_departments!hospital_bookings_next_department_id_fkey(
-    id,
-    name
-  ),
-  patient_records(
-    id,
-    full_name
-  )
-`)
-          .eq("patient_id", patientId)
-          .eq("booking_date", today)
-          .neq("status", "completed")
-          .maybeSingle();
+const {
+  data: patientRecord,
+  error: patientError,
+} = await supabaseAdmin
+  .from("patient_records")
+  .select("id")
+  .eq("user_id", userId)
+  .maybeSingle();
+
+if (patientError || !patientRecord) {
+  return res.json({
+    success: true,
+    progress: null,
+  });
+}
+
+const { data: booking, error: bookingError } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select(`
+      *,
+      hospital_departments!hospital_bookings_department_id_fkey(
+        id,
+        name,
+        average_minutes
+      ),
+      next_department:hospital_departments!hospital_bookings_next_department_id_fkey(
+        id,
+        name
+      ),
+      patient_records(
+        id,
+        full_name
+      )
+    `)
+    .eq("patient_record_id", patientRecord.id)
+    .eq("booking_date", today)
+    .neq("status", "completed")
+    .maybeSingle();
 console.log("LIVE QUEUE BOOKING:", booking);
       if (bookingError) {
         return res.status(400).json({
@@ -1553,24 +1564,39 @@ router.get(
       const boards = [];
 
       for (const dept of departments || []) {
-        // Currently serving
-        const {
-  data: current,
-} = await supabaseAdmin
-  .from("hospital_bookings")
-  .select("queue_number,status")
-  .eq("hospital_id", hospitalId)
-  .eq("department_id", dept.id)
-  .eq("booking_date", today)
-  .in("status", [
-    "called",
-    "checked_in",
-  ])
-  .order("updated_at", {
-    ascending: false,
-  })
-  .limit(1)
-  .maybeSingle();
+        // Currently serving (prefer CALLED, otherwise CHECKED_IN)
+
+let { data: current } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("queue_number,status")
+    .eq("hospital_id", hospitalId)
+    .eq("department_id", dept.id)
+    .eq("booking_date", today)
+    .eq("status", "called")
+    .order("updated_at", {
+      ascending: false,
+    })
+    .limit(1)
+    .maybeSingle();
+
+if (!current) {
+  const { data: checkedIn } =
+    await supabaseAdmin
+      .from("hospital_bookings")
+      .select("queue_number,status")
+      .eq("hospital_id", hospitalId)
+      .eq("department_id", dept.id)
+      .eq("booking_date", today)
+      .eq("status", "checked_in")
+      .order("updated_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+  current = checkedIn;
+}
 
         // Waiting patients
         const {
@@ -1603,9 +1629,7 @@ router.get(
 
           waiting_count:
   waitingList.filter(
-    x =>
-      x.status === "waiting" ||
-      x.status === "called"
+    x => x.status === "waiting"
   ).length,
 
 checked_in_count:
@@ -1614,15 +1638,20 @@ checked_in_count:
   ).length,
 
           next_numbers:
-            waitingList
-              .filter(
-                x =>
-                  x.status === "waiting"
-              )
-              .slice(0, 5)
-              .map(
-                x => x.queue_number
-              ),
+  waitingList
+    .filter(
+      x =>
+        x.status === "waiting"
+    )
+    .sort(
+      (a, b) =>
+        a.queue_position -
+        b.queue_position
+    )
+    .slice(0, 5)
+    .map(
+      x => x.queue_number
+    ),
         });
       }
 
@@ -1701,55 +1730,69 @@ const {data:department}=await supabaseAdmin
 .eq("id",booking.department_id)
 .single();
 
-      // Current serving
-      const { data: currentServing } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select("queue_number")
-          .eq("hospital_id", booking.hospital_id)
-          .eq("department_id", booking.department_id)
-          .eq("booking_date", today)
-          .eq("status", "called")
-          .order("created_at", {
-            ascending: false,
-          })
-          .limit(1)
-          .maybeSingle();
+      // Current serving (prefer CALLED, otherwise CHECKED_IN)
 
+let { data: currentServing } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("queue_number,status")
+    .eq("hospital_id", booking.hospital_id)
+    .eq("department_id", booking.department_id)
+    .eq("booking_date", today)
+    .eq("status", "called")
+    .order("updated_at", {
+      ascending: false,
+    })
+    .limit(1)
+    .maybeSingle();
+
+if (!currentServing) {
+
+  const { data: checkedIn } =
+    await supabaseAdmin
+      .from("hospital_bookings")
+      .select("queue_number,status")
+      .eq("hospital_id", booking.hospital_id)
+      .eq("department_id", booking.department_id)
+      .eq("booking_date", today)
+      .eq("status", "checked_in")
+      .order("updated_at", {
+        ascending: false,
+      })
+      .limit(1)
+      .maybeSingle();
+
+  currentServing = checkedIn;
+
+}
       // Next patients waiting
-      const { data: nextPatients } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select("queue_number")
-          .eq("hospital_id", booking.hospital_id)
-          .eq("department_id", booking.department_id)
-          .eq("booking_date", today)
-          .in("status", [
-            "waiting",
-            "checked_in",
-          ])
-          .order("priority_level", {
-  ascending: true,
-})
-.order("created_at", {
-  ascending: true,
-})
-.limit(5);
+const { data: nextPatients } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("queue_number")
+    .eq("hospital_id", booking.hospital_id)
+    .eq("department_id", booking.department_id)
+    .eq("booking_date", today)
+    .eq("status", "waiting")
+    .order("priority_level", {
+      ascending: true,
+    })
+    .order("queue_position", {
+      ascending: true,
+    })
+    .limit(5);
       // Waiting count
-      const { count: waitingCount } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select("*", {
-            count: "exact",
-            head: true,
-          })
-          .eq("hospital_id", booking.hospital_id)
-          .eq("department_id", booking.department_id)
-          .eq("booking_date", today)
-          .in("status", [
-            "waiting",
-            "checked_in",
-          ]);
+const { count: waitingCount } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("*", {
+      count: "exact",
+      head: true,
+    })
+    .eq("hospital_id", booking.hospital_id)
+    .eq("department_id", booking.department_id)
+    .eq("booking_date", today)
+    .eq("status", "waiting");
           const { count: peopleAhead } =
   await supabaseAdmin
     .from("hospital_bookings")
@@ -1824,38 +1867,79 @@ estimated_wait_minutes:
 
 router.get("/my-queue", authenticate, async (req, res) => {
   try {
-   const patientId = req.user.id;
-
-console.log("MY QUEUE USER:", patientId);
+  const userId = req.user.id;
 
 const today = new Date()
   .toISOString()
   .split("T")[0];
 
-    const { data, error } = await supabaseAdmin
-      .from("hospital_bookings")
-      .select(`
- *,
- hospitals (
-   id,
-   name,
-   city,
-   district,
-   region,
-   phone,
-   address
- ),
- hospital_departments!hospital_bookings_department_id_fkey (
-  id,
-  name
-)
-`)
-      .eq("patient_id", patientId)
-      .eq("booking_date", today)
-      .neq("status", "completed")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle();
+// Find this user's patient record
+const {
+  data: patientRecord,
+  error: patientError,
+} = await supabaseAdmin
+  .from("patient_records")
+  .select("id")
+  .eq("user_id", userId)
+  .maybeSingle();
+
+if (patientError) {
+  return res.status(400).json({
+    success: false,
+    error: patientError.message,
+  });
+}
+
+if (!patientRecord) {
+  return res.json({
+    success: true,
+    booking: null,
+  });
+}
+
+// Find patient's record
+const {
+  data: patientRecord,
+  error: patientError,
+} = await supabaseAdmin
+  .from("patient_records")
+  .select("id")
+  .eq("user_id", userId)
+  .maybeSingle();
+
+if (patientError || !patientRecord) {
+  return res.json({
+    success: true,
+    booking: null,
+  });
+}
+
+const { data, error } = await supabaseAdmin
+  .from("hospital_bookings")
+  .select(`
+    *,
+    hospitals(
+      id,
+      name,
+      city,
+      district,
+      region,
+      phone,
+      address
+    ),
+    hospital_departments!hospital_bookings_department_id_fkey(
+      id,
+      name
+    )
+  `)
+  .eq("patient_record_id", patientRecord.id)
+  .eq("booking_date", today)
+  .neq("status", "completed")
+  .order("created_at", {
+    ascending: false,
+  })
+  .limit(1)
+  .maybeSingle();
 console.log("MY QUEUE RESULT:", data);
     if (error) {
       return res.status(400).json({
