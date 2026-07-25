@@ -649,38 +649,44 @@ router.post("/join-queue", authenticate, async (req, res) => {
     } else {
 
       // ==============================
-      // NORMAL PATIENT BOOKING
-      // ==============================
+// NORMAL PATIENT BOOKING
+// ==============================
 
-      hospital_id = bodyHospitalId;
+hospital_id = bodyHospitalId;
 
-      queuePatientId = req.user.id;
+queuePatientId = req.user.id;
 
-      const {
-        data: patientRecord,
-        error: patientError,
-      } = await supabaseAdmin
-        .from("patient_records")
-        .select("id")
-        .eq("user_id", req.user.id)
-        .maybeSingle();
+if (!patient_record_id) {
+  return res.status(400).json({
+    success: false,
+    error: "patient_record_id is required.",
+  });
+}
 
-      if (patientError) {
-        return res.status(400).json({
-          success: false,
-          error: patientError.message,
-        });
-      }
+const {
+  data: patientRecord,
+  error: patientError,
+} = await supabaseAdmin
+  .from("patient_records")
+  .select("id")
+  .eq("id", patient_record_id)
+  .maybeSingle();
 
-      if (!patientRecord) {
-        return res.status(404).json({
-          success: false,
-          error:
-            "Patient profile not found. Please complete your patient registration first.",
-        });
-      }
+if (patientError) {
+  return res.status(400).json({
+    success: false,
+    error: patientError.message,
+  });
+}
 
-      bookingPatientRecordId = patientRecord.id;
+if (!patientRecord) {
+  return res.status(404).json({
+    success: false,
+    error: "Patient record not found.",
+  });
+}
+
+bookingPatientRecordId = patientRecord.id;
     }
 
     if (!hospital_id) {
@@ -902,7 +908,13 @@ if (
 
 }
 
-
+console.log("INSERT BOOKING", {
+  hospital_id,
+  patient_id: queuePatientId,
+  patient_record_id: bookingPatientRecordId,
+  department_id,
+  bookingDate,
+});
 
 /* ==============================
    INSERT BOOKING
@@ -1114,7 +1126,7 @@ router.get(
     try {
 
       const patientId = req.user.id;
-
+console.log("LIVE QUEUE USER:", patientId);
       const today = new Date()
         .toISOString()
         .split("T")[0];
@@ -1143,7 +1155,7 @@ router.get(
           .eq("booking_date", today)
           .neq("status", "completed")
           .maybeSingle();
-
+console.log("LIVE QUEUE BOOKING:", booking);
       if (bookingError) {
         return res.status(400).json({
           success: false,
@@ -1811,10 +1823,13 @@ estimated_wait_minutes:
 
 router.get("/my-queue", authenticate, async (req, res) => {
   try {
-    const patientId = req.user.id;
-    const today = new Date()
-      .toISOString()
-      .split("T")[0];
+   const patientId = req.user.id;
+
+console.log("MY QUEUE USER:", patientId);
+
+const today = new Date()
+  .toISOString()
+  .split("T")[0];
 
     const { data, error } = await supabaseAdmin
       .from("hospital_bookings")
@@ -1840,7 +1855,7 @@ router.get("/my-queue", authenticate, async (req, res) => {
       .order("created_at", { ascending: false })
       .limit(1)
       .maybeSingle();
-
+console.log("MY QUEUE RESULT:", data);
     if (error) {
       return res.status(400).json({
         success: false,
