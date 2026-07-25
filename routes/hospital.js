@@ -915,7 +915,9 @@ console.log("INSERT BOOKING", {
   department_id,
   bookingDate,
 });
-
+console.log("USER ID:", req.user.id);
+console.log("QUEUE PATIENT ID:", queuePatientId);
+console.log("PATIENT RECORD ID:", bookingPatientRecordId);
 /* ==============================
    INSERT BOOKING
 ============================== */
