@@ -1897,23 +1897,6 @@ if (!patientRecord) {
   });
 }
 
-// Find patient's record
-const {
-  data: patientRecord,
-  error: patientError,
-} = await supabaseAdmin
-  .from("patient_records")
-  .select("id")
-  .eq("user_id", userId)
-  .maybeSingle();
-
-if (patientError || !patientRecord) {
-  return res.json({
-    success: true,
-    booking: null,
-  });
-}
-
 const { data, error } = await supabaseAdmin
   .from("hospital_bookings")
   .select(`
@@ -2355,16 +2338,92 @@ router.get(
             a.status ===
             "admitted"
         ).length;
-        /* ------------------------------
+       /* ------------------------------
    GENDER & AGE
 ------------------------------ */
 
-const malePatients = 0;
-const femalePatients = 0;
+const patientRecordIds =
+  bookings
+    .map(b => b.patient_record_id)
+    .filter(Boolean);
 
-const children = 0;
-const adults = 0;
-const elderly = 0;
+let malePatients = 0;
+let femalePatients = 0;
+
+let children = 0;
+let adults = 0;
+let elderly = 0;
+
+
+if (patientRecordIds.length > 0) {
+
+  const {
+    data: patients,
+  } =
+    await supabaseAdmin
+      .from("patient_records")
+      .select(`
+        id,
+        gender,
+        date_of_birth
+      `)
+      .in(
+        "id",
+        patientRecordIds
+      );
+
+
+  (patients || [])
+    .forEach(patient => {
+
+
+      if (
+        patient.gender === "male"
+      ) {
+        malePatients++;
+      }
+
+
+      if (
+        patient.gender === "female"
+      ) {
+        femalePatients++;
+      }
+
+
+      if (
+        patient.date_of_birth
+      ) {
+
+        const age =
+          Math.floor(
+            (
+              new Date()
+              -
+              new Date(
+                patient.date_of_birth
+              )
+            )
+            /
+            (365.25 * 24 * 60 * 60 * 1000)
+          );
+
+
+        if (age < 18) {
+          children++;
+        }
+        else if (age < 60) {
+          adults++;
+        }
+        else {
+          elderly++;
+        }
+
+      }
+
+    });
+
+}
 /* ------------------------------
    AVERAGE WAITING TIME
 ------------------------------ */
