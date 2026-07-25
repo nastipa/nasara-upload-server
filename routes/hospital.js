@@ -653,20 +653,14 @@ hospital_id = bodyHospitalId;
 
 queuePatientId = req.user.id;
 
-if (!patient_record_id) {
-  return res.status(400).json({
-    success: false,
-    error: "patient_record_id is required.",
-  });
-}
-
+// Find the logged-in user's patient record
 const {
   data: patientRecord,
   error: patientError,
 } = await supabaseAdmin
   .from("patient_records")
   .select("id")
-  .eq("id", patient_record_id)
+  .eq("user_id", req.user.id)
   .maybeSingle();
 
 if (patientError) {
@@ -679,7 +673,7 @@ if (patientError) {
 if (!patientRecord) {
   return res.status(404).json({
     success: false,
-    error: "Patient record not found.",
+    error: "Please complete your patient profile before joining the queue.",
   });
 }
 
@@ -1558,19 +1552,22 @@ router.get(
       for (const dept of departments || []) {
         // Currently serving
         const {
-          data: current,
-        } = await supabaseAdmin
-          .from("hospital_bookings")
-          .select("queue_number")
-          .eq("hospital_id", hospitalId)
-          .eq("department_id", dept.id)
-          .eq("booking_date", today)
-          .eq("status", "called")
-          .order("updated_at", {
-            ascending: false,
-          })
-          .limit(1)
-          .maybeSingle();
+  data: current,
+} = await supabaseAdmin
+  .from("hospital_bookings")
+  .select("queue_number,status")
+  .eq("hospital_id", hospitalId)
+  .eq("department_id", dept.id)
+  .eq("booking_date", today)
+  .in("status", [
+    "called",
+    "checked_in",
+  ])
+  .order("updated_at", {
+    ascending: false,
+  })
+  .limit(1)
+  .maybeSingle();
 
         // Waiting patients
         const {
@@ -1602,14 +1599,16 @@ router.get(
             current?.queue_number || null,
 
           waiting_count:
-            waitingList.filter(
-              x => x.status === "waiting"
-            ).length,
+  waitingList.filter(
+    x =>
+      x.status === "waiting" ||
+      x.status === "called"
+  ).length,
 
-          checked_in_count:
-            waitingList.filter(
-              x => x.status === "checked_in"
-            ).length,
+checked_in_count:
+  waitingList.filter(
+    x => x.status === "checked_in"
+  ).length,
 
           next_numbers:
             waitingList
@@ -1848,7 +1847,7 @@ const today = new Date()
   name
 )
 `)
-      .eq("patient_id", patientId)
+      .or(`patient_id.eq.${patientId},patient_records.user_id.eq.${patientId}`)
       .eq("booking_date", today)
       .neq("status", "completed")
       .order("created_at", { ascending: false })
