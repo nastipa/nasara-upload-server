@@ -165,6 +165,8 @@ async function hospitalAdminAuth(
   try {
     const userId = req.user.id;
 
+    console.log("Authenticated User:", userId);
+
     const { data, error } =
       await supabaseAdmin
         .from("hospital_admins")
@@ -185,6 +187,17 @@ async function hospitalAdminAuth(
         success: false,
         error:
           "You are not an approved hospital administrator.",
+      });
+    }
+
+    console.log("Hospital Admin:", data.user_id);
+    console.log("Hospital:", data.hospital_id);
+
+    if (!data.hospital_id) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "Super Admin cannot access hospital routes.",
       });
     }
 
@@ -4760,7 +4773,9 @@ router.post(
 
       const hospitalId =
         req.hospitalAdmin.hospital_id;
-
+console.log("Hospital:", hospitalId);
+console.log("Booking:", booking_id);
+console.log("Next Department:", next_department_id);
       const {
         booking_id,
         next_department_id,
