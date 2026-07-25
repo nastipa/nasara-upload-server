@@ -654,7 +654,6 @@ app.post("/create-hub360-user", async (req, res) => {
               "User exists but cannot be located",
           });
         }
-
         
         userId = found.id;
 

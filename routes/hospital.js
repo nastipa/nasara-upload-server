@@ -645,7 +645,7 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
     } else {
 
-      // ==============================
+ // ==============================
 // NORMAL PATIENT BOOKING
 // ==============================
 
@@ -653,14 +653,19 @@ hospital_id = bodyHospitalId;
 
 queuePatientId = req.user.id;
 
-// Find the logged-in user's patient record
+if (!patient_record_id) {
+  return res.status(400).json({
+    success: false,
+    error: "patient_record_id is required.",
+  });
+}
 const {
   data: patientRecord,
   error: patientError,
 } = await supabaseAdmin
   .from("patient_records")
   .select("id")
-  .eq("user_id", req.user.id)
+  .eq("id", patient_record_id)
   .maybeSingle();
 
 if (patientError) {
@@ -673,7 +678,7 @@ if (patientError) {
 if (!patientRecord) {
   return res.status(404).json({
     success: false,
-    error: "Please complete your patient profile before joining the queue.",
+    error: "Patient record not found.",
   });
 }
 
@@ -782,8 +787,6 @@ const queuePosition =
 
 const queueNumber =
   `${department.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
-
-
 
 /* ==============================
    BOOKING CODE
@@ -1847,7 +1850,7 @@ const today = new Date()
   name
 )
 `)
-      .or(`patient_id.eq.${patientId},patient_records.user_id.eq.${patientId}`)
+      .eq("patient_id", patientId)
       .eq("booking_date", today)
       .neq("status", "completed")
       .order("created_at", { ascending: false })
@@ -6843,18 +6846,19 @@ router.post(
         await supabaseAdmin
           .from("patient_records")
           .insert({
-            full_name: full_name.trim(),
-            phone: phone?.trim() || null,
-            ghana_card_number:
-              ghana_card_number?.trim() || null,
-            nhis_number:
-              nhis_number?.trim() || null,
-            gender: gender || null,
-            date_of_birth:
-              date_of_birth || null,
-            address:
-              address?.trim() || null,
-          })
+  full_name: full_name.trim(),
+  phone: phone?.trim() || null,
+  ghana_card_number:
+    ghana_card_number?.trim() || null,
+  nhis_number:
+    nhis_number?.trim() || null,
+  gender: gender || null,
+  date_of_birth:
+    date_of_birth || null,
+  address:
+    address?.trim() || null,
+
+})
           .select()
           .single();
 
