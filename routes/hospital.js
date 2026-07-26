@@ -7012,6 +7012,124 @@ router.post(
   }
 );
 /* =========================================================
+   STAFF REGISTER PATIENT
+========================================================= */
+
+router.post(
+  "/staff/register-patient",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId =
+        req.staff.hospital_id;
+
+      const departmentId =
+        req.staff.department_id;
+
+      const staffId =
+        req.staff.id;
+
+      const {
+        full_name,
+        phone,
+        ghana_card_number,
+        nhis_number,
+        gender,
+        date_of_birth,
+        address,
+      } = req.body;
+
+      if (!full_name) {
+        return res.status(400).json({
+          success: false,
+          error: "Full name is required.",
+        });
+      }
+
+      // Check duplicate Ghana Card
+      if (ghana_card_number) {
+        const { data } = await supabaseAdmin
+          .from("patient_records")
+          .select("id")
+          .eq("ghana_card_number", ghana_card_number.trim())
+          .maybeSingle();
+
+        if (data) {
+          return res.status(400).json({
+            success: false,
+            error: "A patient with this Ghana Card number already exists.",
+          });
+        }
+      }
+
+      // Check duplicate NHIS
+      if (nhis_number) {
+        const { data } = await supabaseAdmin
+          .from("patient_records")
+          .select("id")
+          .eq("nhis_number", nhis_number.trim())
+          .maybeSingle();
+
+        if (data) {
+          return res.status(400).json({
+            success: false,
+            error: "A patient with this NHIS number already exists.",
+          });
+        }
+      }
+
+      const {
+        data: patient,
+        error,
+      } = await supabaseAdmin
+        .from("patient_records")
+        .insert({
+
+          full_name: full_name.trim(),
+          phone: phone?.trim() || null,
+          ghana_card_number: ghana_card_number?.trim() || null,
+          nhis_number: nhis_number?.trim() || null,
+          gender: gender || null,
+          date_of_birth: date_of_birth || null,
+          address: address?.trim() || null,
+
+          hospital_id: hospitalId,
+          registered_by: staffId,
+          registration_source: "department_staff",
+          registration_department_id: departmentId,
+
+        })
+        .select()
+        .single();
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Patient registered successfully.",
+        patient,
+      });
+
+    } catch (err) {
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+
+    }
+
+  }
+);
+/* =========================================================
    ONLINE PATIENT JOIN QUEUE
 ========================================================= */
 
