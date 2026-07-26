@@ -7383,47 +7383,43 @@ router.get(
       ---------------------------------- */
 
       const {
-
-        data: patients,
-
-        error: patientsError,
-
-      } =
-      await supabaseAdmin
-      .from("hospital_bookings")
-      .select(`
-        *,
-        patient_records(*),
-        hospital_departments(
-          id,
-          name
-        )
-      `)
-      .eq(
-        "hospital_id",
-        staff.hospital_id
-      )
-      .eq(
-        "department_id",
-        staff.department_id
-      )
-      .eq(
-        "booking_date",
-        today
-      )
-      .order(
-        "priority_level",
-        {
-          ascending:true
-        }
-      )
-      .order(
-        "queue_position",
-        {
-          ascending:true
-        }
-      );
-
+  data: patients,
+  error,
+} =
+await supabaseAdmin
+.from("hospital_bookings")
+.select(`
+  *,
+  patient_records(*),
+  hospital_departments!hospital_bookings_department_id_fkey(
+    id,
+    name
+  )
+`)
+.eq(
+  "hospital_id",
+  staff.hospital_id
+)
+.eq(
+  "department_id",
+  staff.department_id
+)
+.eq(
+  "booking_date",
+  today
+)
+.order(
+  "priority_level",
+  {
+    ascending: true,
+  }
+)
+.order(
+  "queue_position",
+  {
+    ascending: true,
+  }
+);
 
 
       if (patientsError) {
