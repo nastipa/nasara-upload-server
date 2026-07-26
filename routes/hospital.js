@@ -2169,6 +2169,7 @@ router.get(
     .from("hospital_bookings")
     .select(`
       id,
+      patient_record_id,
       status,
       priority,
       created_at,
@@ -2256,8 +2257,9 @@ router.get(
          ADMISSIONS
       ------------------------------ */
 
-      const {
+     const {
   data: admissions,
+  error: admissionError,
 } = await supabaseAdmin
   .from("hospital_admissions")
   .select(`
@@ -2269,7 +2271,6 @@ router.get(
   .or(
     `admitted_at.gte.${today}T00:00:00,admitted_at.lte.${today}T23:59:59,discharged_at.gte.${today}T00:00:00,discharged_at.lte.${today}T23:59:59`
   );
-
       if (admissionError) {
         return res.status(400).json({
           success: false,
@@ -2279,7 +2280,7 @@ router.get(
       }
 
       const admittedToday =
-        admissions.filter(
+       (admissions || []).filter(
           a =>
             a.admitted_at &&
             a.admitted_at.startsWith(
@@ -2288,7 +2289,7 @@ router.get(
         ).length;
 
       const dischargedToday =
-        admissions.filter(
+       (admissions || []).filter(
           a =>
             a.discharged_at &&
             a.discharged_at.startsWith(
@@ -2297,7 +2298,7 @@ router.get(
         ).length;
 
       const currentlyAdmitted =
-        admissions.filter(
+        (admissions || []).filter(
           a =>
             a.status ===
             "admitted"
