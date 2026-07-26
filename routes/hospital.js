@@ -5434,75 +5434,7 @@ async function hospitalDepartmentStaffAuth(
 
   }
 }
-/* =========================================================
-   GET DEPARTMENT STAFF PROFILE
-========================================================= */
 
-router.get(
-  "/staff-profile",
-  authenticate,
-  hospitalDepartmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const staff = req.staff;
-
-
-      return res.json({
-
-        success: true,
-
-        staff: {
-
-          id:
-            staff.id,
-
-          user_id:
-            staff.user_id,
-
-          hospital_id:
-            staff.hospital_id,
-
-          department_id:
-            staff.department_id,
-
-          full_name:
-            staff.full_name,
-
-          email:
-            staff.email,
-
-          role:
-            staff.role,
-
-          status:
-            staff.status,
-
-          active:
-            staff.active,
-
-        },
-
-      });
-
-
-    } catch (err) {
-
-      console.log(err);
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:err.message,
-
-      });
-
-    }
-
-  }
-);
 /* =========================================================
    CREATE DEPARTMENT STAFF
 ========================================================= */
@@ -7706,9 +7638,7 @@ if ((staffCount || 0) > 0) {
    GET SINGLE HOSPITAL
 ========================================================= */
 
-router.get(
-  "/:id([0-9a-fA-F-]{36})",
-  async (req, res) => {
+router.get("/:id", async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -7724,7 +7654,6 @@ router.get(
         error: error.message,
       });
     }
-
     const { data: departments } = await supabaseAdmin
       .from("hospital_departments")
       .select("*")
