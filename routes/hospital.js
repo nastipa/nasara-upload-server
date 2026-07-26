@@ -3983,107 +3983,7 @@ router.put(
     }
   }
 );
-/* =========================================================
-   DELETE HOSPITAL DEPARTMENT
-========================================================= */
 
-router.delete(
-  "/delete-department/:id",
-  authenticate,
-  hospitalAdminAuth,
-  async (req, res) => {
-    try {
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
-
-      const { id } = req.params;
-
-      const { data: department } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .select("*")
-          .eq("id", id)
-          .eq("hospital_id", hospitalId)
-          .maybeSingle();
-
-      if (!department) {
-        return res.status(404).json({
-          success: false,
-          error: "Department not found.",
-        });
-      }
-     const { count: activeBookings } =
-  await supabaseAdmin
-    .from("hospital_bookings")
-    .select("*", {
-      count: "exact",
-      head: true,
-    })
-    .eq("department_id", id)
-    .in("status", [
-      "waiting",
-      "called",
-      "checked_in",
-    ]);
-
-if ((activeBookings || 0) > 0) {
-
-  return res.status(400).json({
-    success: false,
-    error:
-      "This department cannot be deleted because patients are still assigned to it.",
-  });
-
-}
-     const { count: staffCount } =
-await supabaseAdmin
-.from("hospital_department_staff")
-.select("*", {
-  count: "exact",
-  head: true,
-})
-.eq("department_id", id)
-.eq("active", true);
-
-if ((staffCount || 0) > 0) {
-  return res.status(400).json({
-    success:false,
-    error:"Department still has active staff."
-  });
-}
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .update({
-            is_active: false,
-          })
-          .eq("id", id)
-          .select()
-          .single();
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
-      }
-
-      return res.json({
-        success: true,
-        message: "Department deleted successfully.",
-        department: data,
-      });
-
-    } catch (err) {
-      console.log(err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-  }
-);
 /* =========================================================
    CREATE DEFAULT HOSPITAL DEPARTMENTS
 ========================================================= */
@@ -7702,10 +7602,113 @@ router.post(
   }
 );
 /* =========================================================
+   DELETE HOSPITAL DEPARTMENT
+========================================================= */
+
+router.delete(
+  "/delete-department/:id",
+  authenticate,
+  hospitalAdminAuth,
+  async (req, res) => {
+    try {
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
+
+      const { id } = req.params;
+
+      const { data: department } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .select("*")
+          .eq("id", id)
+          .eq("hospital_id", hospitalId)
+          .maybeSingle();
+
+      if (!department) {
+        return res.status(404).json({
+          success: false,
+          error: "Department not found.",
+        });
+      }
+     const { count: activeBookings } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select("*", {
+      count: "exact",
+      head: true,
+    })
+    .eq("department_id", id)
+    .in("status", [
+      "waiting",
+      "called",
+      "checked_in",
+    ]);
+
+if ((activeBookings || 0) > 0) {
+
+  return res.status(400).json({
+    success: false,
+    error:
+      "This department cannot be deleted because patients are still assigned to it.",
+  });
+
+}
+     const { count: staffCount } =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select("*", {
+  count: "exact",
+  head: true,
+})
+.eq("department_id", id)
+.eq("active", true);
+
+if ((staffCount || 0) > 0) {
+  return res.status(400).json({
+    success:false,
+    error:"Department still has active staff."
+  });
+}
+      const { data, error } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .update({
+            is_active: false,
+          })
+          .eq("id", id)
+          .select()
+          .single();
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Department deleted successfully.",
+        department: data,
+      });
+
+    } catch (err) {
+      console.log(err);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
+      });
+    }
+  }
+);
+/* =========================================================
    GET SINGLE HOSPITAL
 ========================================================= */
 
-router.get("/:id", async (req, res) => {
+router.get(
+  "/:id([0-9a-fA-F-]{36})",
+  async (req, res) => {
   try {
     const { id } = req.params;
 
