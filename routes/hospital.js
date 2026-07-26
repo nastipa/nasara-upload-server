@@ -4104,6 +4104,7 @@ router.post(
         { name: "Pediatrics", average_minutes: 15 },
         { name: "Laboratory", average_minutes: 10 },
         { name: "Pharmacy", average_minutes: 5 },
+         { name: "Billing", average_minutes: 5 },
         { name: "Dental", average_minutes: 20 },
         { name: "Eye Clinic", average_minutes: 15 },
         { name: "ENT", average_minutes: 15 },
@@ -6390,78 +6391,7 @@ router.get(
 
   }
 );
-/* =========================================================
-   GET BILLING QUEUE
-========================================================= */
 
-router.get(
-  "/billing-queue",
-  authenticate,
-  hospitalDepartmentStaffAuth,
-  async (req, res) => {
-    try {
-
-      const hospitalId =
-        req.staff.hospital_id;
-
-      const departmentId =
-        req.staff.department_id;
-
-      const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
-
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_bookings")
-          .select(`
-            id,
-            queue_number,
-            booking_code,
-            full_name,
-            phone,
-            current_stage,
-            status,
-            priority,
-            estimated_wait_minutes
-          `)
-          .eq("hospital_id", hospitalId)
-          .eq("department_id", departmentId)
-          .eq("booking_date", today)
-          .in("status", [
-            "waiting",
-            "called",
-            "checked_in",
-          ])
-          .order("queue_position", {
-            ascending: true,
-          });
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
-      }
-
-      return res.json({
-        success: true,
-        queue: data,
-      });
-
-    } catch (err) {
-
-      console.log(err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-
-    }
-  }
-);
 /* =========================================================
    GET NEAREST EMERGENCY HOSPITALS
 ========================================================= */
