@@ -1567,17 +1567,18 @@ router.get(
       const boards = [];
 
       for (const dept of departments || []) {
-        // Currently serving (prefer CALLED, otherwise CHECKED_IN)
+       // Current serving (prefer CALLED, otherwise CHECKED_IN)
 
 let { data: current } =
   await supabaseAdmin
     .from("hospital_bookings")
-    .select("queue_number,status")
+    .select("queue_number,status,called_at")
     .eq("hospital_id", hospitalId)
     .eq("department_id", dept.id)
     .eq("booking_date", today)
     .eq("status", "called")
-    .order("updated_at", {
+    .not("called_at", "is", null)
+    .order("called_at", {
       ascending: false,
     })
     .limit(1)
@@ -1587,12 +1588,12 @@ if (!current) {
   const { data: checkedIn } =
     await supabaseAdmin
       .from("hospital_bookings")
-      .select("queue_number,status")
+      .select("queue_number,status,arrived_at")
       .eq("hospital_id", hospitalId)
       .eq("department_id", dept.id)
       .eq("booking_date", today)
       .eq("status", "checked_in")
-      .order("updated_at", {
+      .order("arrived_at", {
         ascending: false,
       })
       .limit(1)
