@@ -651,38 +651,41 @@ router.post("/join-queue", authenticate, async (req, res) => {
 
 hospital_id = bodyHospitalId;
 
-queuePatientId = req.user.id;
-
 if (!patient_record_id) {
   return res.status(400).json({
     success: false,
     error: "patient_record_id is required.",
   });
 }
+
+// Get authenticated user's patient record
 const {
-  data: patientRecord,
-  error: patientError,
+  data: userPatientRecord,
+  error: userRecordError,
 } = await supabaseAdmin
   .from("patient_records")
-  .select("id")
+  .select("id, user_id")
   .eq("id", patient_record_id)
+  .eq("user_id", req.user.id)
   .maybeSingle();
 
-if (patientError) {
+if (userRecordError) {
   return res.status(400).json({
     success: false,
-    error: patientError.message,
+    error: userRecordError.message,
   });
 }
 
-if (!patientRecord) {
-  return res.status(404).json({
+if (!userPatientRecord) {
+  return res.status(403).json({
     success: false,
-    error: "Patient record not found.",
+    error: "Patient record does not belong to this account.",
   });
 }
 
-bookingPatientRecordId = patientRecord.id;
+// IMPORTANT FIX
+queuePatientId = req.user.id;
+bookingPatientRecordId = userPatientRecord.id;
     }
 
     if (!hospital_id) {
@@ -7044,6 +7047,168 @@ router.post(
       });
 
     }
+  }
+);
+/* =========================================================
+   ONLINE PATIENT JOIN QUEUE
+========================================================= */
+
+router.post(
+  "/online-join-queue",
+  authenticate,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id,
+        patient_record_id,
+        condition,
+      } = req.body;
+
+
+      if (
+        !hospital_id ||
+        !department_id ||
+        !patient_record_id
+      ) {
+        return res.status(400).json({
+          success:false,
+          error:"Missing required fields"
+        });
+      }
+
+
+      const today =
+        new Date()
+        .toISOString()
+        .split("T")[0];
+
+
+      const {
+        data: department,
+      } =
+      await supabaseAdmin
+      .from("hospital_departments")
+      .select("*")
+      .eq("id", department_id)
+      .eq("hospital_id", hospital_id)
+      .single();
+
+
+      if(!department){
+
+        return res.status(404).json({
+          success:false,
+          error:"Department not found"
+        });
+
+      }
+
+
+      const {
+        count
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .select("*",{
+        count:"exact",
+        head:true
+      })
+      .eq("hospital_id",hospital_id)
+      .eq("department_id",department_id)
+      .eq("booking_date",today);
+
+
+
+      const queuePosition =
+        (count || 0) + 1;
+
+
+      const queueNumber =
+        `${department.name
+        .substring(0,3)
+        .toUpperCase()}-${String(queuePosition)
+        .padStart(3,"0")}`;
+
+
+      const bookingCode =
+        "NHS-" +
+        crypto
+        .randomBytes(3)
+        .toString("hex")
+        .toUpperCase();
+
+
+
+      const {
+        data: booking,
+        error
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .insert({
+
+        hospital_id,
+
+        // AUTH USER
+        patient_id:req.user.id,
+
+        patient_record_id,
+
+        department_id,
+
+        booking_date:today,
+
+        queue_number:queueNumber,
+
+        queue_position:queuePosition,
+
+        booking_code:bookingCode,
+
+        qr_code:bookingCode,
+
+        condition:condition || null,
+
+        status:"waiting"
+
+      })
+      .select()
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+          success:false,
+          error:error.message
+        });
+
+      }
+
+
+      return res.json({
+
+        success:true,
+
+        booking
+
+      });
+
+
+    }catch(err){
+
+      console.log(err);
+
+      return res.status(500).json({
+        success:false,
+        error:err.message
+      });
+
+    }
+
   }
 );
 /* =========================================================
