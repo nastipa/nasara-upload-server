@@ -7287,73 +7287,117 @@ if (booking.patient_id === req.user.id) {
   }
 );
 /* =========================================================
-   DEPARTMENT DASHBOARD
+   DEPARTMENT STAFF DASHBOARD
+   Uses Nasara authenticated user account
 ========================================================= */
 
 router.get(
- "/staff-department-dashboard",
- authenticate,
- async(req,res)=>{
+  "/staff-department-dashboard",
+  authenticate,
+  async (req, res) => {
 
     try {
 
       const userId = req.user.id;
 
-      if (!login_id) {
 
-        return res.status(400).json({
-
-          success: false,
-
-          error: "login_id is required.",
-
-        });
-
-      }
+      /* ----------------------------------
+         FIND STAFF PROFILE
+      ---------------------------------- */
 
       const {
-
         data: staff,
-
         error: staffError,
-
       } =
       await supabaseAdmin
       .from("hospital_department_staff")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("active", true)
-      .single();
+      .select(`
+        *,
+        hospital_departments(
+          id,
+          name
+        ),
+        hospitals(
+          id,
+          name,
+          city
+        )
+      `)
+      .eq(
+        "user_id",
+        userId
+      )
+      .eq(
+        "active",
+        true
+      )
+      .maybeSingle();
 
-      if (staffError || !staff) {
 
-        return res.status(404).json({
+      if (staffError) {
 
-          success: false,
+        console.log(
+          "Staff lookup error:",
+          staffError.message
+        );
 
-          error: "Staff not found.",
+        return res.status(400).json({
+
+          success:false,
+
+          error:staffError.message
 
         });
 
       }
 
+
+      if (!staff) {
+
+        return res.status(403).json({
+
+          success:false,
+
+          error:
+          "You are not registered as hospital staff."
+
+        });
+
+      }
+
+
+
+      /* ----------------------------------
+         TODAY DATE
+      ---------------------------------- */
+
       const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
+      new Date()
+      .toISOString()
+      .split("T")[0];
+
+
+
+      /* ----------------------------------
+         LOAD DEPARTMENT PATIENTS
+      ---------------------------------- */
 
       const {
 
         data: patients,
 
-        error,
+        error: patientsError,
 
       } =
       await supabaseAdmin
       .from("hospital_bookings")
       .select(`
         *,
-        patient_records(*)
+        patient_records(*),
+        hospital_departments(
+          id,
+          name
+        )
       `)
       .eq(
         "hospital_id",
@@ -7370,48 +7414,64 @@ router.get(
       .order(
         "priority_level",
         {
-          ascending: true,
+          ascending:true
         }
       )
       .order(
         "queue_position",
         {
-          ascending: true,
+          ascending:true
         }
       );
 
-      if (error) {
+
+
+      if (patientsError) {
 
         return res.status(400).json({
 
-          success: false,
+          success:false,
 
-          error: error.message,
+          error:
+          patientsError.message
 
         });
 
       }
 
+
+
+      /* ----------------------------------
+         RESPONSE
+      ---------------------------------- */
+
       return res.json({
 
-        success: true,
+        success:true,
 
         staff,
 
         patients:
-          patients || [],
+        patients || []
 
       });
 
-    } catch (err) {
 
-      console.log(err);
+
+    } catch(err) {
+
+      console.log(
+        "Department Dashboard Error:",
+        err
+      );
+
 
       return res.status(500).json({
 
-        success: false,
+        success:false,
 
-        error: err.message,
+        error:
+        err.message
 
       });
 
