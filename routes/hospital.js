@@ -7290,17 +7290,14 @@ if (booking.patient_id === req.user.id) {
    DEPARTMENT DASHBOARD
 ========================================================= */
 
-router.post(
-  "/staff-department-dashboard",
-  async (req, res) => {
+router.get(
+ "/staff-department-dashboard",
+ authenticate,
+ async(req,res)=>{
 
     try {
 
-      const {
-
-        login_id,
-
-      } = req.body;
+      const userId = req.user.id;
 
       if (!login_id) {
 
@@ -7324,7 +7321,7 @@ router.post(
       await supabaseAdmin
       .from("hospital_department_staff")
       .select("*")
-      .eq("login_id", login_id)
+      .eq("user_id", userId)
       .eq("active", true)
       .single();
 
