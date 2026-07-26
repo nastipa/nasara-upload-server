@@ -7384,7 +7384,7 @@ router.get(
 
       const {
   data: patients,
-  error,
+  error: patientsError,
 } =
 await supabaseAdmin
 .from("hospital_bookings")
