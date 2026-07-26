@@ -1870,84 +1870,40 @@ estimated_wait_minutes:
 
 router.get("/my-queue", authenticate, async (req, res) => {
   try {
-  const userId = req.user.id;
+    const { booking_id } = req.query;
 
-const today = new Date()
-  .toISOString()
-  .split("T")[0];
+    if (!booking_id) {
+      return res.status(400).json({
+        success: false,
+        error: "booking_id is required",
+      });
+    }
 
-// Find this user's patient record
-const {
-  data: patientRecord,
-  error: patientError,
-} = await supabaseAdmin
-  .from("patient_records")
-  .select("id")
-  .eq("user_id", userId)
-  .maybeSingle();
+    const { data, error } = await supabaseAdmin
+      .from("hospital_bookings")
+      .select(`
+        *,
+        hospitals(
+          id,
+          name,
+          city,
+          district,
+          region,
+          phone,
+          address
+        ),
+        hospital_departments!hospital_bookings_department_id_fkey(
+          id,
+          name
+        )
+      `)
+      .eq("id", booking_id)
+      .maybeSingle();
 
-if (patientError) {
-  return res.status(400).json({
-    success: false,
-    error: patientError.message,
-  });
-}
-
-if (!patientRecord) {
-  return res.json({
-    success: true,
-    booking: null,
-  });
-}
-
-const { booking_id } = req.query;
-
-let query = supabaseAdmin
-  .from("hospital_bookings")
-  .select(`
-    *,
-    hospitals(
-      id,
-      name,
-      city,
-      district,
-      region,
-      phone,
-      address
-    ),
-    hospital_departments!hospital_bookings_department_id_fkey(
-      id,
-      name
-    )
-  `);
-
-if (booking_id) {
-  query = query.eq("id", booking_id);
-} else {
-  query = query
-    .eq("patient_record_id", patientRecord.id)
-    .eq("booking_date", today)
-    .neq("status", "completed")
-    .order("created_at", {
-      ascending: false,
-    })
-    .limit(1);
-}
-
-const { data, error } =
-  await query.maybeSingle();
-console.log("MY QUEUE RESULT:", data);
     if (error) {
       return res.status(400).json({
         success: false,
         error: error.message,
-      });
-    }
-
-    if (!data) {
-      return res.json({
-        success: true,
-        booking: null,
       });
     }
 
@@ -1957,8 +1913,6 @@ console.log("MY QUEUE RESULT:", data);
     });
 
   } catch (err) {
-    console.log(err);
-
     return res.status(500).json({
       success: false,
       error: err.message,
