@@ -7066,165 +7066,132 @@ router.post(
   }
 );
 /* =========================================================
-   ONLINE PATIENT JOIN QUEUE
+   REGISTER PATIENT
 ========================================================= */
 
 router.post(
-  "/online-join-queue",
+  "/register-patient",
   authenticate,
+  hospitalAdminAuth,
   async (req, res) => {
-
     try {
 
       const {
-        hospital_id,
-        department_id,
-        patient_record_id,
-        condition,
+        full_name,
+        phone,
+        ghana_card_number,
+        nhis_number,
+        gender,
+        date_of_birth,
+        address,
       } = req.body;
 
-
-      if (
-        !hospital_id ||
-        !department_id ||
-        !patient_record_id
-      ) {
+      if (!full_name) {
         return res.status(400).json({
-          success:false,
-          error:"Missing required fields"
+          success: false,
+          error: "Full name is required.",
         });
       }
 
+      // Prevent duplicate Ghana Card
+      if (ghana_card_number) {
+        const { data } = await supabaseAdmin
+          .from("patient_records")
+          .select("id")
+          .eq(
+            "ghana_card_number",
+            ghana_card_number.trim()
+          )
+          .maybeSingle();
 
-      const today =
-        new Date()
-        .toISOString()
-        .split("T")[0];
-
-
-      const {
-        data: department,
-      } =
-      await supabaseAdmin
-      .from("hospital_departments")
-      .select("*")
-      .eq("id", department_id)
-      .eq("hospital_id", hospital_id)
-      .single();
-
-
-      if(!department){
-
-        return res.status(404).json({
-          success:false,
-          error:"Department not found"
-        });
-
+        if (data) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "A patient with this Ghana Card number already exists.",
+          });
+        }
       }
 
+      // Prevent duplicate NHIS
+      if (nhis_number) {
+        const { data } = await supabaseAdmin
+          .from("patient_records")
+          .select("id")
+          .eq(
+            "nhis_number",
+            nhis_number.trim()
+          )
+          .maybeSingle();
 
-      const {
-        count
-      } =
-      await supabaseAdmin
-      .from("hospital_bookings")
-      .select("*",{
-        count:"exact",
-        head:true
-      })
-      .eq("hospital_id",hospital_id)
-      .eq("department_id",department_id)
-      .eq("booking_date",today);
-
-
-
-      const queuePosition =
-        (count || 0) + 1;
-
-
-      const queueNumber =
-        `${department.name
-        .substring(0,3)
-        .toUpperCase()}-${String(queuePosition)
-        .padStart(3,"0")}`;
-
-
-      const bookingCode =
-        "NHS-" +
-        crypto
-        .randomBytes(3)
-        .toString("hex")
-        .toUpperCase();
-
-
-
-      const {
-        data: booking,
-        error
-      } =
-      await supabaseAdmin
-      .from("hospital_bookings")
-      .insert({
-
-        hospital_id,
-
-        // AUTH USER
-        patient_id:req.user.id,
-
-        patient_record_id,
-
-        department_id,
-
-        booking_date:today,
-
-        queue_number:queueNumber,
-
-        queue_position:queuePosition,
-
-        booking_code:bookingCode,
-
-        qr_code:bookingCode,
-
-        condition:condition || null,
-
-        status:"waiting"
-
-      })
-      .select()
-      .single();
-
-
-
-      if(error){
-
-        return res.status(400).json({
-          success:false,
-          error:error.message
-        });
-
+        if (data) {
+          return res.status(400).json({
+            success: false,
+            error:
+              "A patient with this NHIS number already exists.",
+          });
+        }
       }
 
+      const { data, error } =
+        await supabaseAdmin
+          .from("patient_records")
+          .insert({
+  full_name: full_name.trim(),
+  phone: phone?.trim() || null,
+  ghana_card_number:
+    ghana_card_number?.trim() || null,
+  nhis_number:
+    nhis_number?.trim() || null,
+  gender: gender || null,
+  date_of_birth:
+    date_of_birth || null,
+  address:
+    address?.trim() || null,
 
+})
+          .select()
+          .single();
+
+      if (error) {
+
+  const msg =
+    error.message.toLowerCase();
+
+  if (
+    msg.includes("duplicate") ||
+    msg.includes("unique")
+  ) {
+
+    return res.status(400).json({
+      success: false,
+      error:
+        "Patient already exists.",
+    });
+
+  }
+
+  return res.status(400).json({
+    success: false,
+    error: error.message,
+  });
+
+}
       return res.json({
-
-        success:true,
-
-        booking
-
+        success: true,
+        patient: data,
       });
 
-
-    }catch(err){
+    } catch (err) {
 
       console.log(err);
 
       return res.status(500).json({
-        success:false,
-        error:err.message
+        success: false,
+        error: err.message,
       });
 
     }
-
   }
 );
 /* =========================================================
