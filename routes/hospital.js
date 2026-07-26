@@ -1900,7 +1900,9 @@ if (!patientRecord) {
   });
 }
 
-const { data, error } = await supabaseAdmin
+const { booking_id } = req.query;
+
+let query = supabaseAdmin
   .from("hospital_bookings")
   .select(`
     *,
@@ -1917,15 +1919,23 @@ const { data, error } = await supabaseAdmin
       id,
       name
     )
-  `)
-  .eq("patient_record_id", patientRecord.id)
-  .eq("booking_date", today)
-  .neq("status", "completed")
-  .order("created_at", {
-    ascending: false,
-  })
-  .limit(1)
-  .maybeSingle();
+  `);
+
+if (booking_id) {
+  query = query.eq("id", booking_id);
+} else {
+  query = query
+    .eq("patient_record_id", patientRecord.id)
+    .eq("booking_date", today)
+    .neq("status", "completed")
+    .order("created_at", {
+      ascending: false,
+    })
+    .limit(1);
+}
+
+const { data, error } =
+  await query.maybeSingle();
 console.log("MY QUEUE RESULT:", data);
     if (error) {
       return res.status(400).json({
