@@ -2214,11 +2214,12 @@ router.get(
         ).length;
 
       const completed =
-        bookings.filter(
-          b =>
-            b.status ===
-            "completed"
-        ).length;
+  bookings.filter(
+    b =>
+      b.status === "completed" &&
+      b.completed_at &&
+      b.completed_at.startsWith(today)
+  ).length;
 
       const cancelled =
         bookings.filter(
@@ -2256,23 +2257,18 @@ router.get(
       ------------------------------ */
 
       const {
-        data: admissions,
-        error:
-          admissionError,
-      } =
-        await supabaseAdmin
-          .from(
-            "hospital_admissions"
-          )
-          .select(`
-            admitted_at,
-            discharged_at,
-            status
-          `)
-          .eq(
-            "hospital_id",
-            hospitalId
-          );
+  data: admissions,
+} = await supabaseAdmin
+  .from("hospital_admissions")
+  .select(`
+    admitted_at,
+    discharged_at,
+    status
+  `)
+  .eq("hospital_id", hospitalId)
+  .or(
+    `admitted_at.gte.${today}T00:00:00,admitted_at.lte.${today}T23:59:59,discharged_at.gte.${today}T00:00:00,discharged_at.lte.${today}T23:59:59`
+  );
 
       if (admissionError) {
         return res.status(400).json({
@@ -2344,19 +2340,16 @@ if (patientRecordIds.length > 0) {
   (patients || [])
     .forEach(patient => {
 
+const gender =
+  (patient.gender || "").toLowerCase();
 
-      if (
-        patient.gender === "male"
-      ) {
-        malePatients++;
-      }
+if (gender === "male") {
+  malePatients++;
+}
 
-
-      if (
-        patient.gender === "female"
-      ) {
-        femalePatients++;
-      }
+if (gender === "female") {
+  femalePatients++;
+}
 
 
       if (
@@ -2364,17 +2357,15 @@ if (patientRecordIds.length > 0) {
       ) {
 
         const age =
-          Math.floor(
-            (
-              new Date()
-              -
-              new Date(
-                patient.date_of_birth
-              )
-            )
-            /
-            (365.25 * 24 * 60 * 60 * 1000)
-          );
+Math.floor(
+(
+new Date(today)
+-
+new Date(patient.date_of_birth)
+)
+/
+(365.25 * 24 * 60 * 60 * 1000)
+);
 
 
         if (age < 18) {
@@ -2443,7 +2434,8 @@ bookings.forEach((booking) => {
 
   if (
     booking.arrived_at &&
-    booking.completed_at
+    booking.completed_at &&
+    booking.completed_at.startsWith(today)
   ) {
 
     const minutes =
@@ -2463,7 +2455,6 @@ bookings.forEach((booking) => {
   }
 
 });
-
 const averageConsultationTime =
   consultationCount > 0
     ? Math.round(
@@ -2596,10 +2587,15 @@ const hourlyMap = {};
 
 bookings.forEach((booking) => {
 
-  const hour =
-    new Date(
-      booking.created_at
-    ).getHours();
+  const bookingDate =
+  booking.created_at.split("T")[0];
+
+if (bookingDate !== today) return;
+
+const hour =
+  new Date(
+    booking.created_at
+  ).getHours();
 
   const label =
     `${hour
