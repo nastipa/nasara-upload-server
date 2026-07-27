@@ -6704,29 +6704,28 @@ router.post(
       ---------------------------------- */
 
       const {
-        data: patient,
-        error: patientError,
-      } = await supabaseAdmin
-        .from("patient_records")
-        .select("id, full_name")
-        .eq("user_id", userId)
-        .maybeSingle();
+  data: patient,
+  error: patientError,
+} = await supabaseAdmin
+  .from("patient_records")
+  .select("id, full_name")
+  .eq("id", patient_record_id)
+  .maybeSingle();
 
-      if (patientError) {
-        return res.status(400).json({
-          success: false,
-          error: patientError.message,
-        });
-      }
+if (patientError) {
+  return res.status(400).json({
+    success: false,
+    error: patientError.message,
+  });
+}
 
-      if (!patient) {
-        return res.status(404).json({
-          success: false,
-          error: "Please register as a patient before joining a queue.",
-        });
-      }
-
-      const patient_record_id = patient.id;
+if (!patient) {
+  return res.status(404).json({
+    success: false,
+    error: "Patient record not found.",
+  });
+}
+  
 
       /* ----------------------------------
          TODAY
