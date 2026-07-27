@@ -6730,102 +6730,136 @@ router.post(
 
       const userId = req.user.id;
 
+      /* -----------------------------
+         CHECK DEPARTMENT STAFF
+      ----------------------------- */
 
-      // Check hospital staff
       const {
-        data: staff
+        data: staff,
+        error: staffError,
       } =
       await supabaseAdmin
-      .from("hospital_department_staff")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("active", true)
-      .maybeSingle();
+        .from("hospital_department_staff")
+        .select(`
+          id,
+          hospital_id,
+          department_id
+        `)
+        .eq("user_id", userId)
+        .eq("active", true)
+        .maybeSingle();
 
+      /* -----------------------------
+         CHECK HOSPITAL ADMIN
+      ----------------------------- */
 
-
-      // Check hospital admin
       const {
-        data: admin
+        data: admin,
+        error: adminError,
       } =
       await supabaseAdmin
-      .from("hospital_admins")
-      .select("*")
-      .eq("user_id", userId)
-      .eq("status", "approved")
-      .maybeSingle();
+        .from("hospital_admins")
+        .select(`
+          id,
+          hospital_id
+        `)
+        .eq("user_id", userId)
+        .eq("status", "approved")
+        .maybeSingle();
 
+      if (staffError || adminError) {
 
+        return res.status(500).json({
+
+          success: false,
+
+          error:
+            "Unable to verify permissions.",
+
+        });
+
+      }
 
       if (!staff && !admin) {
 
         return res.status(403).json({
 
-          success:false,
+          success: false,
 
           error:
-          "You are not authorised to register patients."
+            "You are not authorised to register patients.",
 
         });
 
       }
 
-
+      /* -----------------------------
+         REQUEST BODY
+      ----------------------------- */
 
       const {
+
         full_name,
+
         phone,
+
         ghana_card_number,
+
         nhis_number,
+
         gender,
+
         date_of_birth,
+
         address,
 
       } = req.body;
 
-
-
-      if(!full_name){
+      if (!full_name) {
 
         return res.status(400).json({
 
-          success:false,
+          success: false,
 
           error:
-          "Full name is required."
+            "Full name is required.",
 
         });
 
       }
 
+      const patientPhone =
+        phone?.trim() || null;
 
+      const ghanaCard =
+        ghana_card_number?.trim() || null;
 
-      // Duplicate Ghana Card check
+      const nhis =
+        nhis_number?.trim() || null;
 
-      if(ghana_card_number){
+      /* -----------------------------
+         DUPLICATE PHONE
+      ----------------------------- */
+
+      if (patientPhone) {
 
         const {
-          data:existingGhana
+          data: existingPhone,
         } =
         await supabaseAdmin
-        .from("patient_records")
-        .select("id")
-        .eq(
-          "ghana_card_number",
-          ghana_card_number.trim()
-        )
-        .maybeSingle();
+          .from("patient_records")
+          .select("id")
+          .eq("phone", patientPhone)
+          .maybeSingle();
 
-
-
-        if(existingGhana){
+        if (existingPhone) {
 
           return res.status(400).json({
 
-            success:false,
+            success: false,
 
             error:
-            "Patient with this Ghana Card already exists."
+              "Patient with this phone number already exists.",
 
           });
 
@@ -6833,72 +6867,283 @@ router.post(
 
       }
 
+      /* -----------------------------
+         DUPLICATE GHANA CARD
+      ----------------------------- */
 
-
-      // Duplicate NHIS check
-
-      if(nhis_number){
+      if (ghanaCard) {
 
         const {
-          data:existingNhis
+          data: existingGhana,
         } =
         await supabaseAdmin
-        .from("patient_records")
-        .select("id")
-        .eq(
-          "nhis_number",
-          nhis_number.trim()
-        )
-        .maybeSingle();
+          .from("patient_records")
+          .select("id")
+          .eq(
+            "ghana_card_number",
+            ghanaCard
+          )
+          .maybeSingle();
 
-
-
-        if(existingNhis){
+        if (existingGhana) {
 
           return res.status(400).json({
 
-            success:false,
+            success: false,
 
             error:
-            "Patient with this NHIS number already exists."
+              "Patient with this Ghana Card already exists.",
 
           });
 
         }
 
       }
+
+      /* -----------------------------
+         DUPLICATE NHIS
+      ----------------------------- */
+
+      if (nhis) {
+
+        const {
+          data: existingNhis,
+        } =
+        await supabaseAdmin
+          .from("patient_records")
+          .select("id")
+          .eq(
+            "nhis_number",
+            nhis
+          )
+          .maybeSingle();
+
+        if (existingNhis) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            error:
+              "Patient with this NHIS number already exists.",
+
+          });
+
+        }
+
+      }
+
+      /* -----------------------------
+         CREATE PATIENT
+      ----------------------------- */
+
+      const {
+        data: patient,
+        error,
+      } =
+      await supabaseAdmin
+        .from("patient_records")
+        .insert({
+
+          full_name:
+            full_name.trim(),
+
+          phone:
+            patientPhone,
+
+          ghana_card_number:
+            ghanaCard,
+
+          nhis_number:
+            nhis,
+
+          gender:
+            gender || null,
+
+          date_of_birth:
+            date_of_birth || null,
+
+          address:
+            address?.trim() || null,
+
+          registered_by:
+            userId,
+
+          registered_by_type:
+            admin
+              ? "hospital_admin"
+              : "department_staff",
+
+          hospital_id:
+            admin
+              ? admin.hospital_id
+              : staff.hospital_id,
+
+        })
+        .select()
+        .single();
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            error.message,
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        patient,
+
+      });
+
+    } catch (err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error:
+          err.message,
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   ONLINE PATIENT JOIN QUEUE
+========================================================= */
+
+router.post(
+  "/online-join-queue",
+  authenticate,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id,
+        patient_record_id,
+        condition,
+      } = req.body;
+
+
+      if (
+        !hospital_id ||
+        !department_id ||
+        !patient_record_id
+      ) {
+        return res.status(400).json({
+          success:false,
+          error:"Missing required fields"
+        });
+      }
+
+
+      const today =
+        new Date()
+        .toISOString()
+        .split("T")[0];
+
+
+      const {
+        data: department,
+      } =
+      await supabaseAdmin
+      .from("hospital_departments")
+      .select("*")
+      .eq("id", department_id)
+      .eq("hospital_id", hospital_id)
+      .single();
+
+
+      if(!department){
+
+        return res.status(404).json({
+          success:false,
+          error:"Department not found"
+        });
+
+      }
+
+
+      const {
+        count
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .select("*",{
+        count:"exact",
+        head:true
+      })
+      .eq("hospital_id",hospital_id)
+      .eq("department_id",department_id)
+      .eq("booking_date",today);
+
+
+
+      const queuePosition =
+        (count || 0) + 1;
+
+
+      const queueNumber =
+        `${department.name
+        .substring(0,3)
+        .toUpperCase()}-${String(queuePosition)
+        .padStart(3,"0")}`;
+
+
+      const bookingCode =
+        "NHS-" +
+        crypto
+        .randomBytes(3)
+        .toString("hex")
+        .toUpperCase();
 
 
 
       const {
-        data:patient,
+        data: booking,
         error
       } =
       await supabaseAdmin
-      .from("patient_records")
+      .from("hospital_bookings")
       .insert({
 
-        full_name:
-        full_name.trim(),
+        hospital_id,
 
-        phone:
-        phone?.trim() || null,
+        // AUTH USER
+        patient_id:req.user.id,
 
-        ghana_card_number:
-        ghana_card_number?.trim() || null,
+        patient_record_id,
 
-        nhis_number:
-        nhis_number?.trim() || null,
+        department_id,
 
-        gender:
-        gender || null,
+        booking_date:today,
 
-        date_of_birth:
-        date_of_birth || null,
+        queue_number:queueNumber,
 
-        address:
-        address?.trim() || null,
+        queue_position:queuePosition,
 
+        booking_code:bookingCode,
+
+        qr_code:bookingCode,
+
+        condition:condition || null,
+
+        status:"waiting"
 
       })
       .select()
@@ -6909,291 +7154,37 @@ router.post(
       if(error){
 
         return res.status(400).json({
-
           success:false,
-
           error:error.message
-
         });
 
       }
-
 
 
       return res.json({
 
         success:true,
 
-        patient
+        booking
 
       });
-
 
 
     }catch(err){
 
       console.log(err);
 
-
       return res.status(500).json({
-
         success:false,
-
         error:err.message
-
       });
 
     }
 
   }
 );
-/* =========================================================
-   STAFF REGISTER PATIENT
-========================================================= */
 
-router.post(
-  "/staff/register-patient",
-  authenticate,
-  hospitalDepartmentStaffAuth,
-  async (req, res) => {
 
-    try {
-
-      const hospitalId =
-        req.staff.hospital_id;
-
-      const departmentId =
-        req.staff.department_id;
-
-      const staffId =
-        req.staff.id;
-
-      const {
-        full_name,
-        phone,
-        ghana_card_number,
-        nhis_number,
-        gender,
-        date_of_birth,
-        address,
-      } = req.body;
-
-      if (!full_name) {
-        return res.status(400).json({
-          success: false,
-          error: "Full name is required.",
-        });
-      }
-
-      // Check duplicate Ghana Card
-      if (ghana_card_number) {
-        const { data } = await supabaseAdmin
-          .from("patient_records")
-          .select("id")
-          .eq("ghana_card_number", ghana_card_number.trim())
-          .maybeSingle();
-
-        if (data) {
-          return res.status(400).json({
-            success: false,
-            error: "A patient with this Ghana Card number already exists.",
-          });
-        }
-      }
-
-      // Check duplicate NHIS
-      if (nhis_number) {
-        const { data } = await supabaseAdmin
-          .from("patient_records")
-          .select("id")
-          .eq("nhis_number", nhis_number.trim())
-          .maybeSingle();
-
-        if (data) {
-          return res.status(400).json({
-            success: false,
-            error: "A patient with this NHIS number already exists.",
-          });
-        }
-      }
-
-      const {
-        data: patient,
-        error,
-      } = await supabaseAdmin
-        .from("patient_records")
-        .insert({
-
-          full_name: full_name.trim(),
-          phone: phone?.trim() || null,
-          ghana_card_number: ghana_card_number?.trim() || null,
-          nhis_number: nhis_number?.trim() || null,
-          gender: gender || null,
-          date_of_birth: date_of_birth || null,
-          address: address?.trim() || null,
-
-          hospital_id: hospitalId,
-          registered_by: staffId,
-          registration_source: "department_staff",
-          registration_department_id: departmentId,
-
-        })
-        .select()
-        .single();
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
-      }
-
-      return res.json({
-        success: true,
-        message: "Patient registered successfully.",
-        patient,
-      });
-
-    } catch (err) {
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-
-    }
-
-  }
-);
-/* =========================================================
-   REGISTER PATIENT
-========================================================= */
-
-router.post(
-  "/register-patient",
-  authenticate,
-  hospitalAdminAuth,
-  async (req, res) => {
-    try {
-
-      const {
-        full_name,
-        phone,
-        ghana_card_number,
-        nhis_number,
-        gender,
-        date_of_birth,
-        address,
-      } = req.body;
-
-      if (!full_name) {
-        return res.status(400).json({
-          success: false,
-          error: "Full name is required.",
-        });
-      }
-
-      // Prevent duplicate Ghana Card
-      if (ghana_card_number) {
-        const { data } = await supabaseAdmin
-          .from("patient_records")
-          .select("id")
-          .eq(
-            "ghana_card_number",
-            ghana_card_number.trim()
-          )
-          .maybeSingle();
-
-        if (data) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "A patient with this Ghana Card number already exists.",
-          });
-        }
-      }
-
-      // Prevent duplicate NHIS
-      if (nhis_number) {
-        const { data } = await supabaseAdmin
-          .from("patient_records")
-          .select("id")
-          .eq(
-            "nhis_number",
-            nhis_number.trim()
-          )
-          .maybeSingle();
-
-        if (data) {
-          return res.status(400).json({
-            success: false,
-            error:
-              "A patient with this NHIS number already exists.",
-          });
-        }
-      }
-
-      const { data, error } =
-        await supabaseAdmin
-          .from("patient_records")
-          .insert({
-  full_name: full_name.trim(),
-  phone: phone?.trim() || null,
-  ghana_card_number:
-    ghana_card_number?.trim() || null,
-  nhis_number:
-    nhis_number?.trim() || null,
-  gender: gender || null,
-  date_of_birth:
-    date_of_birth || null,
-  address:
-    address?.trim() || null,
-
-})
-          .select()
-          .single();
-
-      if (error) {
-
-  const msg =
-    error.message.toLowerCase();
-
-  if (
-    msg.includes("duplicate") ||
-    msg.includes("unique")
-  ) {
-
-    return res.status(400).json({
-      success: false,
-      error:
-        "Patient already exists.",
-    });
-
-  }
-
-  return res.status(400).json({
-    success: false,
-    error: error.message,
-  });
-
-}
-      return res.json({
-        success: true,
-        patient: data,
-      });
-
-    } catch (err) {
-
-      console.log(err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-
-    }
-  }
-);
 /* =========================================================
    PATIENT JOURNEY
 ========================================================= */
@@ -7321,7 +7312,6 @@ router.get(
 
       const userId = req.user.id;
 
-
       /* ----------------------------------
          FIND STAFF PROFILE
       ---------------------------------- */
@@ -7331,29 +7321,28 @@ router.get(
         error: staffError,
       } =
       await supabaseAdmin
-      .from("hospital_department_staff")
-      .select(`
-        *,
-        hospital_departments(
+        .from("hospital_department_staff")
+        .select(`
           id,
-          name
-        ),
-        hospitals(
-          id,
-          name,
-          city
-        )
-      `)
-      .eq(
-        "user_id",
-        userId
-      )
-      .eq(
-        "active",
-        true
-      )
-      .maybeSingle();
-
+          user_id,
+          hospital_id,
+          department_id,
+          full_name,
+          role,
+          active,
+          hospital_departments(
+            id,
+            name
+          ),
+          hospitals(
+            id,
+            name,
+            city
+          )
+        `)
+        .eq("user_id", userId)
+        .eq("active", true)
+        .maybeSingle();
 
       if (staffError) {
 
@@ -7364,99 +7353,155 @@ router.get(
 
         return res.status(400).json({
 
-          success:false,
+          success: false,
 
-          error:staffError.message
+          error: staffError.message,
 
         });
 
       }
-
 
       if (!staff) {
 
         return res.status(403).json({
 
-          success:false,
+          success: false,
 
           error:
-          "You are not registered as hospital staff."
+            "You are not registered as hospital staff.",
 
         });
 
       }
 
-
-
       /* ----------------------------------
-         TODAY DATE
+         TODAY
       ---------------------------------- */
 
       const today =
-      new Date()
-      .toISOString()
-      .split("T")[0];
-
-
+        new Date()
+          .toISOString()
+          .split("T")[0];
 
       /* ----------------------------------
-         LOAD DEPARTMENT PATIENTS
+         LOAD TODAY'S BOOKINGS
       ---------------------------------- */
 
       const {
-  data: patients,
-  error: patientsError,
-} =
-await supabaseAdmin
-.from("hospital_bookings")
-.select(`
-  *,
-  patient_records(*),
-  hospital_departments!hospital_bookings_department_id_fkey(
-    id,
-    name
-  )
-`)
-.eq(
-  "hospital_id",
-  staff.hospital_id
-)
-.eq(
-  "department_id",
-  staff.department_id
-)
-.eq(
-  "booking_date",
-  today
-)
-.order(
-  "priority_level",
-  {
-    ascending: true,
-  }
-)
-.order(
-  "queue_position",
-  {
-    ascending: true,
-  }
-);
-
+        data: patients,
+        error: patientsError,
+      } =
+      await supabaseAdmin
+        .from("hospital_bookings")
+        .select(`
+          *,
+          patient_records(*),
+          hospital_departments!hospital_bookings_department_id_fkey(
+            id,
+            name
+          )
+        `)
+        .eq(
+          "hospital_id",
+          staff.hospital_id
+        )
+        .eq(
+          "department_id",
+          staff.department_id
+        )
+        .eq(
+          "booking_date",
+          today
+        )
+        .order(
+          "priority_level",
+          {
+            ascending: true,
+          }
+        )
+        .order(
+          "queue_position",
+          {
+            ascending: true,
+          }
+        );
 
       if (patientsError) {
 
         return res.status(400).json({
 
-          success:false,
+          success: false,
 
           error:
-          patientsError.message
+            patientsError.message,
 
         });
 
       }
 
+      const bookings =
+        patients || [];
 
+      /* ----------------------------------
+         STATISTICS
+      ---------------------------------- */
+
+      const waiting =
+        bookings.filter(
+          p => p.status === "waiting"
+        ).length;
+
+      const called =
+        bookings.filter(
+          p => p.status === "called"
+        ).length;
+
+      const checkedIn =
+        bookings.filter(
+          p => p.status === "checked_in"
+        ).length;
+
+      const completed =
+        bookings.filter(
+          p => p.status === "completed"
+        ).length;
+
+      const cancelled =
+        bookings.filter(
+          p => p.status === "cancelled"
+        ).length;
+
+      const emergency =
+        bookings.filter(
+          p => p.priority === "emergency"
+        ).length;
+
+      const urgent =
+        bookings.filter(
+          p => p.priority === "urgent"
+        ).length;
+
+      /* ----------------------------------
+         CURRENT PATIENT
+      ---------------------------------- */
+
+      const currentPatient =
+        bookings.find(
+          p =>
+            p.status === "called" ||
+            p.status === "checked_in"
+        ) || null;
+
+      /* ----------------------------------
+         NEXT PATIENTS
+      ---------------------------------- */
+
+      const nextPatients =
+        bookings
+          .filter(
+            p => p.status === "waiting"
+          )
+          .slice(0, 5);
 
       /* ----------------------------------
          RESPONSE
@@ -7464,31 +7509,73 @@ await supabaseAdmin
 
       return res.json({
 
-        success:true,
+        success: true,
 
-        staff,
+        dashboard: {
+
+          staff_name:
+            staff.full_name,
+
+          role:
+            staff.role,
+
+          hospital:
+            staff.hospitals?.name,
+
+          city:
+            staff.hospitals?.city,
+
+          department:
+            staff.hospital_departments?.name,
+
+        },
+
+        stats: {
+
+          total_patients:
+            bookings.length,
+
+          waiting,
+
+          called,
+
+          checked_in:
+            checkedIn,
+
+          completed,
+
+          cancelled,
+
+          emergency,
+
+          urgent,
+
+        },
+
+        current_patient:
+          currentPatient,
+
+        next_patients:
+          nextPatients,
 
         patients:
-        patients || []
+          bookings,
 
       });
 
-
-
-    } catch(err) {
+    } catch (err) {
 
       console.log(
         "Department Dashboard Error:",
         err
       );
 
-
       return res.status(500).json({
 
-        success:false,
+        success: false,
 
         error:
-        err.message
+          err.message,
 
       });
 
