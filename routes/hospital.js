@@ -1869,56 +1869,59 @@ estimated_wait_minutes:
    GET MY ACTIVE QUEUE
 ========================================================= */
 
-router.get("/my-queue", authenticate, async (req, res) => {
-  try {
-    const { booking_id } = req.query;
+router.get("/my-queue", authenticate, async (req,res)=>{
+try{
 
-    if (!booking_id) {
-      return res.status(400).json({
-        success: false,
-        error: "booking_id is required",
-      });
-    }
+const userId = req.user.id;
 
-    const { data, error } = await supabaseAdmin
-      .from("hospital_bookings")
-      .select(`
-        *,
-        hospitals(
-          id,
-          name,
-          city,
-          district,
-          region,
-          phone,
-          address
-        ),
-        hospital_departments!hospital_bookings_department_id_fkey(
-          id,
-          name
-        )
-      `)
-      .eq("id", booking_id)
-      .maybeSingle();
 
-    if (error) {
-      return res.status(400).json({
-        success: false,
-        error: error.message,
-      });
-    }
+const {data,error}=await supabaseAdmin
+.from("hospital_bookings")
+.select(`
+*,
+hospitals(
+id,
+name,
+city,
+district,
+region,
+phone,
+address
+),
+hospital_departments(
+id,
+name
+)
+`)
+.eq("patient_id", userId)
+.order("created_at",{ascending:false})
+.limit(1)
+.maybeSingle();
 
-    return res.json({
-      success: true,
-      booking: data,
-    });
 
-  } catch (err) {
-    return res.status(500).json({
-      success: false,
-      error: err.message,
-    });
-  }
+if(error){
+return res.status(400).json({
+success:false,
+error:error.message
+});
+}
+
+
+return res.json({
+success:true,
+booking:data
+});
+
+
+}catch(err){
+
+return res.status(500).json({
+success:false,
+error:err.message
+});
+
+}
+
 });
 /* =========================================================
    GET PATIENT VISIT HISTORY
