@@ -1878,26 +1878,25 @@ const userId = req.user.id;
 const {data,error}=await supabaseAdmin
 .from("hospital_bookings")
 .select(`
-*,
-hospitals(
-id,
-name,
-city,
-district,
-region,
-phone,
-address
-),
-hospital_departments(
-id,
-name
-)
+  *,
+  hospitals(
+    id,
+    name,
+    city,
+    district,
+    region,
+    phone,
+    address
+  ),
+  hospital_departments!hospital_bookings_department_id_fkey(
+    id,
+    name
+  )
 `)
 .eq("patient_id", userId)
 .order("created_at",{ascending:false})
 .limit(1)
 .maybeSingle();
-
 
 if(error){
 return res.status(400).json({
