@@ -3837,48 +3837,7 @@ router.post(
     }
   }
 );
-/* =========================================================
-   GET HOSPITAL DEPARTMENTS
-========================================================= */
 
-router.get(
-  "/departments",
-  authenticate,
-  hospitalAdminAuth,
-  async (req, res) => {
-    try {
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
-
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .select("*")
-          .eq("hospital_id", hospitalId)
-          .order("name");
-
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
-      }
-
-      return res.json({
-        success: true,
-        departments: data || [],
-      });
-
-    } catch (err) {
-      console.log(err);
-
-      return res.status(500).json({
-        success: false,
-        error: err.message,
-      });
-    }
-  }
-);
 /* =========================================================
    UPDATE HOSPITAL DEPARTMENT
 ========================================================= */
@@ -7032,13 +6991,13 @@ router.post(
 
     try {
 
-      const {
-        hospital_id,
-        department_id,
-        patient_record_id,
-        condition,
-      } = req.body;
+     const {
+  hospital_id,
+  department_id,
+  condition,
+} = req.body;
 
+const userId = req.user.id;
 
       if (
         !hospital_id ||
