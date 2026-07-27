@@ -6686,6 +6686,7 @@ router.post(
       const {
         hospital_id,
         department_id,
+        patient_record_id,
         condition,
       } = req.body;
 
