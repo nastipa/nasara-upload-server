@@ -2523,78 +2523,108 @@ router.get(
 
     try {
 
-      const userId = req.user.id;
+     const userId = req.user.id;
+
+let hospitalId = null;
+let departmentId = null;
+let role = null;
 
 
-      /*
-        VERIFY DEPARTMENT STAFF
-      */
+/*
+ CHECK HOSPITAL ADMIN FIRST
+*/
 
-      const {
-        data: staff,
-        error: staffError,
-      } =
-      await supabaseAdmin
-        .from("hospital_department_staff")
-        .select(`
-          id,
-          hospital_id,
-          department_id,
-          status,
-          active
-        `)
-        .eq(
-          "user_id",
-          userId
-        )
-        .eq(
-          "active",
-          true
-        )
-        .eq(
-          "status",
-          "approved"
-        )
-        .maybeSingle();
+const {
+  data: hospitalAdmin,
+}
+=
+await supabaseAdmin
+.from("hospital_admins")
+.select(`
+ hospital_id,
+ role,
+ status
+`)
+.eq(
+ "user_id",
+ userId
+)
+.eq(
+ "status",
+ "approved"
+)
+.maybeSingle();
 
 
+if (hospitalAdmin) {
 
-      if(staffError){
+  hospitalId =
+    hospitalAdmin.hospital_id;
 
-        return res.status(400).json({
+  role =
+    "hospital_admin";
 
-          success:false,
-
-          error:
-          staffError.message,
-
-        });
-
-      }
+}
 
 
+/*
+ IF NOT HOSPITAL ADMIN,
+ CHECK DEPARTMENT STAFF
+*/
 
-      if(!staff){
+if (!hospitalAdmin) {
 
-        return res.status(403).json({
+const {
+ data: departmentStaff,
+}
+=
+await supabaseAdmin
+.from("hospital_department_staff")
+.select(`
+ hospital_id,
+ department_id,
+ status,
+ active
+`)
+.eq(
+"user_id",
+userId
+)
+.eq(
+"active",
+true
+)
+.eq(
+"status",
+"approved"
+)
+.maybeSingle();
 
-          success:false,
-
-          error:
-          "You are not approved department staff."
-
-        });
-
-      }
 
 
+if (!departmentStaff) {
 
-      const hospitalId =
-        staff.hospital_id;
+return res.status(403).json({
+ success:false,
+ error:
+ "No analytics access"
+});
+
+}
 
 
-      const departmentId =
-        staff.department_id;
+hospitalId =
+departmentStaff.hospital_id;
+
+
+departmentId =
+departmentStaff.department_id;
+
+
+role =
+"department_staff";
+
+}
 
       const today =
         req.query.date ||
@@ -2604,41 +2634,60 @@ router.get(
 
       /* ------------------------------
          BOOKINGS TODAY
-      ------------------------------ */
+------------------------------ */
 
-      const {
+let {
   data: bookings,
   error: bookingError,
 } =
-  await supabaseAdmin
-    .from("hospital_bookings")
-    .select(`
+await supabaseAdmin
+  .from("hospital_bookings")
+  .select(`
+    id,
+    patient_record_id,
+    status,
+    priority,
+    created_at,
+    called_at,
+    arrived_at,
+    completed_at,
+    department_id,
+    hospital_departments!hospital_bookings_department_id_fkey(
       id,
-      patient_record_id,
-      status,
-      priority,
-      created_at,
-      called_at,
-      arrived_at,
-      completed_at,
-      department_id,
-      hospital_departments!hospital_bookings_department_id_fkey(
-        id,
-        name
-      )
-    `)
-    .eq("hospital_id", hospitalId)
-.eq("department_id", departmentId)
-.eq("booking_date", today);
+      name
+    )
+  `)
+  .eq("hospital_id", hospitalId)
+  .eq("booking_date", today);
 
-      if (bookingError) {
-        return res.status(400).json({
-          success: false,
-          error:
-            bookingError.message,
-        });
-      }
+if (bookingError) {
+  return res.status(400).json({
+    success: false,
+    error:
+      bookingError.message,
+  });
+}
 
+
+/*
+  Department staff should only
+  see their own department.
+  Hospital admin sees all
+  departments in the hospital.
+*/
+
+if (
+  role === "department_staff"
+) {
+
+  bookings =
+    (bookings || []).filter(
+      booking =>
+        booking.department_id ===
+        departmentId
+    );
+
+}
       const waiting =
         bookings.filter(
           b =>
@@ -4034,26 +4083,106 @@ req.departmentStaff.department_id;
 router.get(
   "/department-utilisation",
   authenticate,
-  departmentStaffAuth,
   async (req, res) => {
 
     try {
 
+  const userId = req.user.id;
 
-      const hospitalId =
-        req.departmentStaff.hospital_id;
+  let hospitalId = null;
+  let departmentId = null;
+  let role = null;
 
+  /*
+    CHECK HOSPITAL ADMIN
+  */
 
-      const departmentId =
-        req.departmentStaff.department_id;
+  const {
+    data: hospitalAdmin,
+  } =
+  await supabaseAdmin
+  .from("hospital_admins")
+  .select(`
+    hospital_id,
+    status
+  `)
+  .eq(
+    "user_id",
+    userId
+  )
+  .eq(
+    "status",
+    "approved"
+  )
+  .maybeSingle();
 
+  if (hospitalAdmin) {
 
+    hospitalId =
+      hospitalAdmin.hospital_id;
 
-      const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
+    role =
+      "hospital_admin";
 
+  }
+
+  /*
+    IF NOT HOSPITAL ADMIN,
+    CHECK DEPARTMENT STAFF
+  */
+
+  if (!hospitalAdmin) {
+
+    const {
+      data: staff,
+    } =
+    await supabaseAdmin
+    .from("hospital_department_staff")
+    .select(`
+      hospital_id,
+      department_id,
+      status,
+      active
+    `)
+    .eq(
+      "user_id",
+      userId
+    )
+    .eq(
+      "active",
+      true
+    )
+    .eq(
+      "status",
+      "approved"
+    )
+    .maybeSingle();
+
+    if (!staff) {
+
+      return res.status(403).json({
+        success: false,
+        error:
+          "You do not have access.",
+      });
+
+    }
+
+    hospitalId =
+      staff.hospital_id;
+
+    departmentId =
+      staff.department_id;
+
+    role =
+      "department_staff";
+
+  }
+
+  const today =
+    new Date()
+      .toISOString()
+      .split("T")[0];
 
 
       const {
@@ -4116,17 +4245,24 @@ router.get(
         priority
       `)
       .eq(
-        "hospital_id",
-        hospitalId
-      )
-      .eq(
-        "department_id",
+  "hospital_id",
+  hospitalId
+)
+.eq(
+  "booking_date",
+  today
+);
+
+if (role === "department_staff") {
+
+  bookings =
+    (bookings || []).filter(
+      booking =>
+        booking.department_id ===
         departmentId
-      )
-      .eq(
-        "booking_date",
-        today
-      );
+    );
+
+}
 
 
 
@@ -7600,7 +7736,7 @@ error:err.message
 router.post(
   "/search-patient",
   authenticate,
-  hospitalAdminAuth,
+  departmentStaffAuth,
   async (req, res) => {
     try {
 
@@ -8734,13 +8870,13 @@ router.get(
 router.get(
   "/voice-queue",
   authenticate,
-  hospitalAdminAuth,
+  departmentStaffAuth,
   async (req, res) => {
 
     try {
 
       const hospitalId =
-        req.hospitalAdmin.hospital_id;
+        req.departmentStaff.hospital_id;
 
       const { data, error } =
         await supabaseAdmin
@@ -8787,10 +8923,13 @@ router.get(
 router.post(
   "/voice-queue/played",
   authenticate,
-  hospitalAdminAuth,
+  departmentStaffAuth,
   async (req, res) => {
 
     try {
+
+      const hospitalId =
+        req.departmentStaff.hospital_id;
 
       const { id } = req.body;
 
@@ -8808,6 +8947,7 @@ router.post(
             played: true,
             played_at: new Date().toISOString(),
           })
+          .eq("id", id)
           .eq("hospital_id", hospitalId)
           .select()
           .single();
