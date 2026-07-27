@@ -3142,11 +3142,16 @@ hourly.forEach((item) => {
 return res.json({
   success:true,
 
-  staff:{
-    hospital_id: staff.hospital_id,
-    department_id: staff.department_id,
-  },
+ access: {
+  role,
 
+  hospital_id: hospitalId,
+
+  department_id:
+    role === "department_staff"
+      ? departmentId
+      : null,
+},
   analytics:{
 
   date: today,
@@ -4077,7 +4082,8 @@ req.departmentStaff.department_id;
 );
 
 /* =========================================================
-   DEPARTMENT UTILISATION (STAFF)
+   DEPARTMENT UTILISATION
+   (HOSPITAL ADMIN + DEPARTMENT STAFF)
 ========================================================= */
 
 router.get(
@@ -4087,305 +4093,419 @@ router.get(
 
     try {
 
-  const userId = req.user.id;
+      const userId = req.user.id;
 
-  let hospitalId = null;
-  let departmentId = null;
-  let role = null;
+      let hospitalId = null;
+      let departmentId = null;
+      let role = null;
 
-  /*
-    CHECK HOSPITAL ADMIN
-  */
-
-  const {
-    data: hospitalAdmin,
-  } =
-  await supabaseAdmin
-  .from("hospital_admins")
-  .select(`
-    hospital_id,
-    status
-  `)
-  .eq(
-    "user_id",
-    userId
-  )
-  .eq(
-    "status",
-    "approved"
-  )
-  .maybeSingle();
-
-  if (hospitalAdmin) {
-
-    hospitalId =
-      hospitalAdmin.hospital_id;
-
-    role =
-      "hospital_admin";
-
-  }
-
-  /*
-    IF NOT HOSPITAL ADMIN,
-    CHECK DEPARTMENT STAFF
-  */
-
-  if (!hospitalAdmin) {
-
-    const {
-      data: staff,
-    } =
-    await supabaseAdmin
-    .from("hospital_department_staff")
-    .select(`
-      hospital_id,
-      department_id,
-      status,
-      active
-    `)
-    .eq(
-      "user_id",
-      userId
-    )
-    .eq(
-      "active",
-      true
-    )
-    .eq(
-      "status",
-      "approved"
-    )
-    .maybeSingle();
-
-    if (!staff) {
-
-      return res.status(403).json({
-        success: false,
-        error:
-          "You do not have access.",
-      });
-
-    }
-
-    hospitalId =
-      staff.hospital_id;
-
-    departmentId =
-      staff.department_id;
-
-    role =
-      "department_staff";
-
-  }
-
-  const today =
-    new Date()
-      .toISOString()
-      .split("T")[0];
-
+      /* -----------------------------
+         CHECK HOSPITAL ADMIN
+      ----------------------------- */
 
       const {
-        data: department,
-        error: depError
-      }
-      =
+        data: hospitalAdmin,
+        error: adminError,
+      } =
       await supabaseAdmin
-      .from("hospital_departments")
-      .select(`
-        id,
-        name,
-        average_minutes
-      `)
-      .eq(
-        "id",
-        departmentId
-      )
-      .eq(
-        "hospital_id",
-        hospitalId
-      )
-      .eq(
-        "is_active",
-        true
-      )
-      .single();
+        .from("hospital_admins")
+        .select(`
+          hospital_id,
+          status
+        `)
+        .eq(
+          "user_id",
+          userId
+        )
+        .eq(
+          "status",
+          "approved"
+        )
+        .maybeSingle();
 
-
-
-      if(
-        depError ||
-        !department
-      ){
-
-        return res.status(404).json({
-
-          success:false,
-
-          error:
-          "Department not found"
-
-        });
-
-      }
-
-
-
-
-
-      const {
-        data: bookings,
-        error: bookingError
-      }
-      =
-      await supabaseAdmin
-      .from("hospital_bookings")
-      .select(`
-        status,
-        priority
-      `)
-      .eq(
-  "hospital_id",
-  hospitalId
-)
-.eq(
-  "booking_date",
-  today
-);
-
-if (role === "department_staff") {
-
-  bookings =
-    (bookings || []).filter(
-      booking =>
-        booking.department_id ===
-        departmentId
-    );
-
-}
-
-
-
-
-      if(bookingError){
+      if (adminError) {
 
         return res.status(400).json({
 
-          success:false,
+          success: false,
 
           error:
-          bookingError.message
+            adminError.message,
 
         });
 
       }
 
+      if (hospitalAdmin) {
 
+        hospitalId =
+          hospitalAdmin.hospital_id;
 
+        role =
+          "hospital_admin";
 
-      const total =
-      bookings?.length || 0;
+      }
 
+      /* -----------------------------
+         CHECK DEPARTMENT STAFF
+      ----------------------------- */
 
+      if (!hospitalAdmin) {
 
-      const statistics = {
-
-        department_id:
-        department.id,
-
-
-        department_name:
-        department.name,
-
-
-        waiting:
-        bookings.filter(
-          b =>
-          b.status === "waiting"
-        ).length,
-
-
-        called:
-        bookings.filter(
-          b =>
-          b.status === "called"
-        ).length,
-
-
-        checked_in:
-        bookings.filter(
-          b =>
-          b.status === "checked_in"
-        ).length,
-
-
-        completed:
-        bookings.filter(
-          b =>
-          b.status === "completed"
-        ).length,
-
-
-        emergency:
-        bookings.filter(
-          b =>
-          b.priority === "emergency"
-        ).length,
-
-
-        urgent:
-        bookings.filter(
-          b =>
-          b.priority === "urgent"
-        ).length,
-
-
-        total,
-
-
-        utilisation:
-        Math.min(
-          100,
-          Math.round(
-            (
-              bookings.filter(
-                b =>
-                b.status !== "completed"
-              ).length
-              /
-              Math.max(total,1)
-            )
-            *
-            100
+        const {
+          data: staff,
+          error: staffError,
+        } =
+        await supabaseAdmin
+          .from("hospital_department_staff")
+          .select(`
+            hospital_id,
+            department_id,
+            status,
+            active
+          `)
+          .eq(
+            "user_id",
+            userId
           )
+          .eq(
+            "status",
+            "approved"
+          )
+          .eq(
+            "active",
+            true
+          )
+          .maybeSingle();
+
+        if (staffError) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            error:
+              staffError.message,
+
+          });
+
+        }
+
+        if (!staff) {
+
+          return res.status(403).json({
+
+            success: false,
+
+            error:
+              "You do not have access.",
+
+          });
+
+        }
+
+        hospitalId =
+          staff.hospital_id;
+
+        departmentId =
+          staff.department_id;
+
+        role =
+          "department_staff";
+
+      }
+
+      const today =
+        new Date()
+          .toISOString()
+          .split("T")[0];
+
+      /* -----------------------------
+         LOAD DEPARTMENTS
+      ----------------------------- */
+
+      let departments = [];
+
+      if (
+        role ===
+        "hospital_admin"
+      ) {
+
+        const {
+          data,
+          error,
+        } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .select(`
+            id,
+            name,
+            average_minutes
+          `)
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .eq(
+            "is_active",
+            true
+          )
+          .order(
+            "name",
+            {
+              ascending: true,
+            }
+          );
+
+        if (error) {
+
+          return res.status(400).json({
+
+            success: false,
+
+            error:
+              error.message,
+
+          });
+
+        }
+
+        departments =
+          data || [];
+
+      } else {
+
+        const {
+          data,
+          error,
+        } =
+        await supabaseAdmin
+          .from("hospital_departments")
+          .select(`
+            id,
+            name,
+            average_minutes
+          `)
+          .eq(
+            "id",
+            departmentId
+          )
+          .eq(
+            "hospital_id",
+            hospitalId
+          )
+          .eq(
+            "is_active",
+            true
+          )
+          .single();
+
+        if (
+          error ||
+          !data
+        ) {
+
+          return res.status(404).json({
+
+            success: false,
+
+            error:
+              "Department not found",
+
+          });
+
+        }
+
+        departments = [
+          data,
+        ];
+
+      }
+      /* -----------------------------
+         LOAD TODAY BOOKINGS
+      ----------------------------- */
+
+      const {
+        data: bookings,
+        error: bookingError,
+      } =
+      await supabaseAdmin
+        .from("hospital_bookings")
+        .select(`
+          department_id,
+          status,
+          priority
+        `)
+        .eq(
+          "hospital_id",
+          hospitalId
         )
+        .eq(
+          "booking_date",
+          today
+        );
 
-      };
+      if (bookingError) {
 
+        return res.status(400).json({
 
+          success: false,
 
+          error:
+            bookingError.message,
+
+        });
+
+      }
+
+      const allBookings =
+        bookings || [];
+
+      /* -----------------------------
+         BUILD DEPARTMENT STATISTICS
+      ----------------------------- */
+
+      const departmentStatistics =
+        departments.map(
+          (department) => {
+
+            const departmentBookings =
+              allBookings.filter(
+                (booking) =>
+                  booking.department_id ===
+                  department.id
+              );
+
+            const total =
+              departmentBookings.length;
+
+            const waiting =
+              departmentBookings.filter(
+                b =>
+                  b.status ===
+                  "waiting"
+              ).length;
+
+            const called =
+              departmentBookings.filter(
+                b =>
+                  b.status ===
+                  "called"
+              ).length;
+
+            const checkedIn =
+              departmentBookings.filter(
+                b =>
+                  b.status ===
+                  "checked_in"
+              ).length;
+
+            const completed =
+              departmentBookings.filter(
+                b =>
+                  b.status ===
+                  "completed"
+              ).length;
+
+            const emergency =
+              departmentBookings.filter(
+                b =>
+                  b.priority ===
+                  "emergency"
+              ).length;
+
+            const urgent =
+              departmentBookings.filter(
+                b =>
+                  b.priority ===
+                  "urgent"
+              ).length;
+
+            const utilisation =
+              total > 0
+                ? Math.min(
+                    100,
+                    Math.round(
+                      (
+                        departmentBookings.filter(
+                          b =>
+                            b.status !==
+                            "completed"
+                        ).length /
+                        total
+                      ) * 100
+                    )
+                  )
+                : 0;
+
+            return {
+
+              department_id:
+                department.id,
+
+              department_name:
+                department.name,
+
+              average_minutes:
+                department.average_minutes,
+
+              waiting,
+
+              called,
+
+              checked_in:
+                checkedIn,
+
+              completed,
+
+              emergency,
+
+              urgent,
+
+              total,
+
+              utilisation,
+
+            };
+
+          }
+        );
+      /* -----------------------------
+         RESPONSE
+      ----------------------------- */
 
       return res.json({
 
-        success:true,
+        success: true,
 
-        department:statistics
+        role,
+
+        hospital_id:
+          hospitalId,
+
+        department_id:
+          role === "department_staff"
+            ? departmentId
+            : null,
+
+        total_departments:
+          departmentStatistics.length,
+
+        departments:
+          departmentStatistics,
 
       });
 
-
-
-    } catch(err){
+    } catch (err) {
 
       console.log(err);
 
-
       return res.status(500).json({
 
-        success:false,
+        success: false,
 
         error:
-        err.message
+          err.message,
 
       });
 
@@ -6196,6 +6316,32 @@ router.post(
         });
 
       }
+      for (const item of working_hours) {
+
+  if (
+    !item.is_closed &&
+    !item.is_24_hours
+  ) {
+
+    if (
+      !item.opening_time ||
+      !item.closing_time
+    ) {
+
+      return res.status(400).json({
+
+        success: false,
+
+        error:
+          `Opening and closing times are required for day ${item.day_of_week}.`,
+
+      });
+
+    }
+
+  }
+
+}
 
       const rows =
         working_hours.map(item => ({
