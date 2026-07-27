@@ -3539,10 +3539,8 @@ router.post(
       const staffDepartmentId =
         req.departmentStaff.department_id;
 
-
-      const {
-        department_id,
-      } = req.body;
+const department_id =
+req.departmentStaff.department_id;
 
 
 
