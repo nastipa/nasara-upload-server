@@ -1390,7 +1390,8 @@ const progress =
   }
 );
 /* =========================================================
-   DEPARTMENT STAFF LIVE BOARD
+   HOSPITAL LIVE BOARD
+   SHOW ALL DEPARTMENTS
 ========================================================= */
 
 router.get(
@@ -1403,39 +1404,40 @@ router.get(
       const userId = req.user.id;
 
 
-      /* -----------------------------
-         GET STAFF INFORMATION
-      ----------------------------- */
+      /* --------------------------------
+         FIND STAFF HOSPITAL
+      -------------------------------- */
 
       const {
         data: staff,
-        error: staffError,
+        error: staffError
       } =
       await supabaseAdmin
-        .from("hospital_department_staff")
-        .select(`
-          hospital_id,
-          department_id
-        `)
-        .eq(
-          "user_id",
-          userId
-        )
-        .eq(
-          "active",
-          true
-        )
-        .maybeSingle();
+      .from("hospital_department_staff")
+      .select(`
+        hospital_id
+      `)
+      .eq(
+        "user_id",
+        userId
+      )
+      .eq(
+        "active",
+        true
+      )
+      .maybeSingle();
+
 
 
       if (staffError) {
 
-        return res.status(500).json({
+        return res.status(400).json({
           success:false,
-          error:staffError.message,
+          error:staffError.message
         });
 
       }
+
 
 
       if (!staff) {
@@ -1443,100 +1445,116 @@ router.get(
         return res.status(403).json({
           success:false,
           error:
-          "You are not an active department staff member.",
+          "You are not an active hospital staff member."
         });
 
       }
+
 
 
       const hospitalId =
         staff.hospital_id;
 
 
-      const departmentId =
-        staff.department_id;
-
-
 
       const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
+      new Date()
+      .toISOString()
+      .split("T")[0];
 
 
 
-      /* -----------------------------
-         HOSPITAL NAME
-      ----------------------------- */
+      /* --------------------------------
+         GET HOSPITAL NAME
+      -------------------------------- */
 
       const {
         data:hospital,
-      } =
-      await supabaseAdmin
-        .from("hospitals")
-        .select("name")
-        .eq(
-          "id",
-          hospitalId
-        )
-        .single();
-
-
-
-      /* -----------------------------
-         DEPARTMENT
-      ----------------------------- */
-
-      const {
-        data:department,
-        error:deptError,
+        error:hospitalError
       }
       =
       await supabaseAdmin
-        .from("hospital_departments")
-        .select(`
-          id,
-          name,
-          average_minutes
-        `)
-        .eq(
-          "id",
-          departmentId
-        )
-        .eq(
-          "hospital_id",
-          hospitalId
-        )
-        .single();
+      .from("hospitals")
+      .select("name")
+      .eq(
+        "id",
+        hospitalId
+      )
+      .single();
 
 
 
-      if(deptError || !department){
+      if(hospitalError){
 
-        return res.status(404).json({
+        return res.status(400).json({
           success:false,
-          error:
-          "Department not found.",
+          error:hospitalError.message
         });
 
       }
 
 
 
-      /* -----------------------------
-         CURRENT SERVING
-      ----------------------------- */
 
+      /* --------------------------------
+         GET ALL DEPARTMENTS
+      -------------------------------- */
 
       const {
-        data:current,
+        data:departments,
+        error:departmentError
       }
       =
       await supabaseAdmin
+      .from("hospital_departments")
+      .select(`
+        id,
+        name,
+        average_minutes
+      `)
+      .eq(
+        "hospital_id",
+        hospitalId
+      )
+      .order(
+        "name"
+      );
+
+
+
+      if(departmentError){
+
+        return res.status(400).json({
+          success:false,
+          error:departmentError.message
+        });
+
+      }
+
+
+
+      const board = [];
+
+
+
+      /* --------------------------------
+         LOAD QUEUE FOR EACH DEPARTMENT
+      -------------------------------- */
+
+      for(
+        const department of departments || []
+      ){
+
+
+
+        const {
+          data:current
+        }
+        =
+        await supabaseAdmin
         .from("hospital_bookings")
         .select(`
           queue_number,
-          status,
           called_at
         `)
         .eq(
@@ -1545,7 +1563,7 @@ router.get(
         )
         .eq(
           "department_id",
-          departmentId
+          department.id
         )
         .eq(
           "booking_date",
@@ -1566,22 +1584,19 @@ router.get(
 
 
 
-      /* -----------------------------
-         WAITING PATIENTS
-      ----------------------------- */
 
 
-      const {
-        data:waitingPatients,
-      }
-      =
-      await supabaseAdmin
+        const {
+          data:queues
+        }
+        =
+        await supabaseAdmin
         .from("hospital_bookings")
         .select(`
           queue_number,
           queue_position,
-          priority_level,
-          status
+          status,
+          priority_level
         `)
         .eq(
           "hospital_id",
@@ -1589,7 +1604,7 @@ router.get(
         )
         .eq(
           "department_id",
-          departmentId
+          department.id
         )
         .eq(
           "booking_date",
@@ -1618,12 +1633,59 @@ router.get(
 
 
 
-      const waiting =
-        (waitingPatients || [])
+
+        const waitingPatients =
+        (queues || [])
         .filter(
-          p =>
-          p.status === "waiting"
+          item =>
+          item.status === "waiting"
         );
+
+
+
+
+        board.push({
+
+          department_id:
+            department.id,
+
+
+          department_name:
+            department.name,
+
+
+          current_serving:
+            current?.queue_number ||
+            null,
+
+
+          waiting:
+            waitingPatients.length,
+
+
+
+          average_wait_minutes:
+            waitingPatients.length *
+            (
+              department.average_minutes ||
+              10
+            ),
+
+
+
+          next_numbers:
+            waitingPatients
+            .slice(0,5)
+            .map(
+              item =>
+              item.queue_number
+            )
+
+        });
+
+
+      }
+
 
 
 
@@ -1633,68 +1695,30 @@ router.get(
 
 
         hospital:
-          hospital?.name || "",
+          hospital.name,
 
 
-        department:{
-          id:
-            department.id,
-
-          name:
-            department.name,
-        },
-
-
-        current_serving:
-          current?.queue_number ||
-          null,
-
-
-        waiting:
-          waiting.length,
-
-
-        checked_in:
-          (waitingPatients || [])
-          .filter(
-            p =>
-            p.status === "checked_in"
-          )
-          .length,
-
-
-        average_wait_minutes:
-          waiting.length *
-          (
-            department.average_minutes ||
-            10
-          ),
-
-
-        next_numbers:
-          waiting
-          .slice(0,5)
-          .map(
-            item =>
-            item.queue_number
-          ),
-
+        departments:
+          board
 
       });
 
 
 
-    } catch(err){
+    } catch(error) {
 
-      console.log(err);
+
+      console.log(
+        "LIVE BOARD ERROR:",
+        error
+      );
 
 
       return res.status(500).json({
 
         success:false,
 
-        error:
-        err.message,
+        error:error.message
 
       });
 
