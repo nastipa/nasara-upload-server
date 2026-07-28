@@ -9154,47 +9154,95 @@ router.get(
 
     try {
 
-      const hospitalId =
-        req.departmentStaff.hospital_id;
+      const {
+        hospital_id,
+        department_id
+      } =
+      req.departmentStaff;
+
 
       const { data, error } =
         await supabaseAdmin
           .from("hospital_voice_queue")
-          .select("*")
-          .eq("hospital_id", hospitalId)
-          .eq("played", false)
-          .order("priority", {
-            ascending: true,
-          })
-          .order("created_at", {
-            ascending: true,
-          })
+          .select(`
+            id,
+            booking_id,
+            queue_number,
+            message,
+            language,
+            priority,
+            department_id,
+            created_at
+          `)
+          .eq(
+            "hospital_id",
+            hospital_id
+          )
+          .eq(
+            "department_id",
+            department_id
+          )
+          .eq(
+            "played",
+            false
+          )
+          .order(
+            "priority",
+            {
+              ascending:true,
+            }
+          )
+          .order(
+            "created_at",
+            {
+              ascending:true,
+            }
+          )
           .limit(1);
 
-      if (error) {
+
+      if(error){
+
         return res.status(400).json({
-          success: false,
-          error: error.message,
+
+          success:false,
+
+          error:error.message,
+
         });
+
       }
 
+
       return res.json({
-        success: true,
+
+        success:true,
+
         announcement:
           data?.[0] || null,
+
       });
 
-    } catch (err) {
+
+    }catch(err){
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:err.message,
+
       });
 
     }
 
   }
 );
+
+
+
+
+
 /* =========================================================
    MARK VOICE ANNOUNCEMENT PLAYED
 ========================================================= */
@@ -9203,54 +9251,114 @@ router.post(
   "/voice-queue/played",
   authenticate,
   departmentStaffAuth,
-  async (req, res) => {
+  async(req,res)=>{
 
-    try {
 
-      const hospitalId =
-        req.departmentStaff.hospital_id;
+    try{
 
-      const { id } = req.body;
 
-      if (!id) {
+      const {
+        hospital_id,
+        department_id
+      }
+      =
+      req.departmentStaff;
+
+
+      const {
+        id
+      }
+      =
+      req.body;
+
+
+
+      if(!id){
+
         return res.status(400).json({
-          success: false,
-          error: "Voice queue id is required.",
+
+          success:false,
+
+          error:
+          "Voice queue id required"
+
         });
+
       }
 
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_voice_queue")
-          .update({
-            played: true,
-            played_at: new Date().toISOString(),
-          })
-          .eq("id", id)
-          .eq("hospital_id", hospitalId)
-          .select()
-          .single();
 
-      if (error) {
-        return res.status(400).json({
-          success: false,
-          error: error.message,
-        });
+
+      const {
+        data,
+        error
       }
+      =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_queue"
+      )
+      .update({
+
+        played:true,
+
+        played_at:
+        new Date()
+        .toISOString()
+
+      })
+      .eq(
+        "id",
+        id
+      )
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      )
+      .select()
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
 
       return res.json({
-        success: true,
-        announcement: data,
+
+        success:true,
+
+        announcement:data
+
       });
 
-    } catch (err) {
+
+
+    }catch(err){
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:err.message
+
       });
 
     }
+
 
   }
 );
