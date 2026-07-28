@@ -9165,17 +9165,18 @@ router.get(
       const { data, error } =
         await supabaseAdmin
           .from("hospital_voice_queue")
-          .select(`
-            id,
-            booking_id,
-            queue_number,
-            message,
-            language,
-            priority,
-            department_id,
-            created_at,
-            played_at
-          `)
+         .select(`
+  id,
+  booking_id,
+  queue_number,
+  message,
+  language,
+  priority,
+  audio_url,
+  audio_type,
+  department_id,
+  created_at
+`)
           .eq(
             "hospital_id",
             hospital_id
