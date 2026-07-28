@@ -5163,7 +5163,7 @@ router.post(
 router.get(
   "/departments",
   authenticate,
-  hospitalStaffAuth,
+  hospitalDepartmentStaffAuth,
   async (req, res) => {
 
     try {
