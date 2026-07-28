@@ -9759,6 +9759,334 @@ router.get(
 
   }
 );
+/*
+================================================
+UPLOAD VOICE TEMPLATE
+================================================
+*/
+
+router.post(
+"/upload-voice-template",
+authenticate,
+async(req,res)=>{
+
+
+try{
+
+
+const userId =
+req.user.id;
+
+
+
+const {
+
+language,
+
+template_type,
+
+audio_url
+
+}
+=
+req.body;
+
+
+
+
+if(
+!language ||
+!template_type ||
+!audio_url
+){
+
+return res.status(400).json({
+
+success:false,
+
+error:"Missing template information"
+
+});
+
+}
+
+
+
+
+
+/*
+===========================
+GET HOSPITAL
+===========================
+*/
+
+
+const {
+data:staff,
+error
+}
+=
+await supabaseAdmin
+
+.from(
+"hospital_department_staff"
+)
+
+.select(
+"hospital_id"
+)
+
+.eq(
+"user_id",
+userId
+)
+
+.single();
+
+
+
+
+
+if(error || !staff){
+
+
+return res.status(403).json({
+
+success:false,
+
+error:"Hospital staff not found"
+
+});
+
+
+}
+
+
+
+
+
+
+const {
+data,
+error:insertError
+}
+=
+await supabaseAdmin
+
+.from(
+"hospital_voice_templates"
+)
+
+.insert({
+
+hospital_id:
+staff.hospital_id,
+
+
+language,
+
+template_type,
+
+audio_url,
+
+
+})
+
+.select()
+.single();
+
+
+
+
+
+
+
+if(insertError){
+
+throw insertError;
+
+}
+
+
+
+
+
+return res.json({
+
+success:true,
+
+template:data
+
+});
+
+
+
+
+
+}
+catch(error){
+
+
+console.log(
+"VOICE TEMPLATE ERROR",
+error
+);
+
+
+
+res.status(500).json({
+
+success:false,
+
+error:error.message
+
+});
+
+
+}
+
+
+});
+
+/* =========================================================
+  VOICE TEMPLATE
+========================================================= */
+
+router.get(
+"/voice-template",
+authenticate,
+async(req,res)=>{
+
+
+try{
+
+
+const {
+
+language,
+
+template_type
+
+}
+
+=
+req.query;
+
+
+
+
+
+const userId =
+req.user.id;
+
+
+
+
+
+
+const {
+data:staff
+}
+=
+await supabaseAdmin
+
+.from(
+"hospital_department_staff"
+)
+
+.select(
+"hospital_id"
+)
+
+.eq(
+"user_id",
+userId
+)
+
+.single();
+
+
+
+
+
+
+
+const {
+data:template,
+error
+}
+=
+await supabaseAdmin
+
+.from(
+"hospital_voice_templates"
+)
+
+.select("*")
+
+.eq(
+"hospital_id",
+staff.hospital_id
+)
+
+.eq(
+"language",
+language
+)
+
+.eq(
+"template_type",
+template_type
+)
+
+.maybeSingle();
+
+
+
+
+
+
+
+
+if(error){
+
+throw error;
+
+}
+
+
+
+
+
+res.json({
+
+success:true,
+
+template
+
+});
+
+
+
+
+
+}
+catch(error){
+
+
+res.status(500).json({
+
+success:false,
+
+error:error.message
+
+});
+
+
+}
+
+
+});
 /* =========================================================
    GET VOICE RECORDINGS
    Hospital staff list available announcement voices
