@@ -5660,6 +5660,7 @@ if (status === "called") {
       message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
 
       language: "en",
+      recording_id:null,
 
       priority: booking.priority_level || 3,
 
@@ -9172,7 +9173,8 @@ router.get(
             language,
             priority,
             department_id,
-            created_at
+            created_at,
+            played_at
           `)
           .eq(
             "hospital_id",
@@ -9359,6 +9361,854 @@ router.post(
 
     }
 
+
+  }
+);
+/* =========================================================
+   UPLOAD VOICE RECORDING
+   Hospital staff records local language announcements
+========================================================= */
+
+router.post(
+  "/upload-voice-recording",
+  authenticate,
+  departmentStaffAuth,
+  upload.single("audio"),
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      const {
+        language_code,
+        voice_name
+      } = req.body;
+
+
+      if (!req.file) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:"Audio file required"
+
+        });
+
+      }
+
+
+      if (!language_code || !voice_name) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "language_code and voice_name required"
+
+        });
+
+      }
+
+
+
+      /*
+        Upload to Cloudflare R2
+        using your existing upload helper
+      */
+
+
+      const audioUrl =
+        await uploadToR2(
+          req.file.buffer,
+          req.file.originalname,
+          req.file.mimetype
+        );
+
+
+
+      const {
+        data,
+        error
+      } =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_recordings"
+      )
+      .insert({
+
+        hospital_id,
+
+        department_id,
+
+        language_code,
+
+        voice_name,
+
+        audio_url:
+          audioUrl,
+
+        created_by:
+          req.user.id,
+
+      })
+      .select()
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        recording:data
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Voice upload error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   GET VOICE RECORDINGS
+   Hospital staff list available announcement voices
+========================================================= */
+
+router.get(
+  "/voice-recordings",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      const {
+        data,
+        error
+      } =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_recordings"
+      )
+      .select(`
+        id,
+        language_code,
+        voice_name,
+        audio_url,
+        enabled,
+        created_at
+      `)
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      )
+      .eq(
+        "enabled",
+        true
+      )
+      .order(
+        "created_at",
+        {
+          ascending:false
+        }
+      );
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+      return res.json({
+
+        success:true,
+
+        recordings:
+          data || []
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Voice recordings error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   UPLOAD VOICE RECORDING
+   Department staff records local language announcement
+========================================================= */
+
+router.post(
+  "/upload-voice-recording",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      const {
+        booking_id,
+        queue_number,
+        language,
+        audio_url,
+        message
+      } = req.body;
+
+
+      if (
+        !booking_id ||
+        !queue_number ||
+        !audio_url ||
+        !language
+      ) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "booking_id, queue_number, language and audio_url are required"
+
+        });
+
+      }
+
+
+      /*
+        Save voice announcement
+      */
+
+      const {
+        data,
+        error
+      } =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_queue"
+      )
+      .insert({
+
+        hospital_id,
+
+        department_id,
+
+        booking_id,
+
+        queue_number,
+
+        message:
+          message ||
+          `Queue ${queue_number}, please proceed.`,
+
+        language,
+
+        audio_url,
+
+        audio_type:
+        "recording",
+
+        played:false,
+
+      })
+      .select()
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        announcement:data
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Upload voice error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   GET DEPARTMENT VOICE SETTINGS
+   Returns enabled announcement languages
+   and templates for department staff
+========================================================= */
+
+router.get(
+  "/department-voice-settings",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      /*
+        Load enabled languages
+      */
+
+      const {
+        data: languages,
+        error: languageError
+      } =
+      await supabaseAdmin
+      .from(
+        "hospital_announcement_languages"
+      )
+      .select(`
+        id,
+        language_code,
+        language_name,
+        display_order
+      `)
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "enabled",
+        true
+      )
+      .order(
+        "display_order",
+        {
+          ascending:true
+        }
+      );
+
+
+      if(languageError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          languageError.message
+
+        });
+
+      }
+
+
+
+      /*
+        Load announcement templates
+      */
+
+      const {
+        data: templates,
+        error: templateError
+      }
+      =
+      await supabaseAdmin
+      .from(
+        "hospital_announcement_templates"
+      )
+      .select(`
+        id,
+        language_code,
+        template_name,
+        template_text
+      `)
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "enabled",
+        true
+      );
+
+
+
+      if(templateError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          templateError.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        department_id,
+
+        languages:
+          languages || [],
+
+        templates:
+          templates || [],
+
+        default_language:
+          "en"
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Voice settings error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:
+        err.message
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   CREATE DEFAULT VOICE LANGUAGES
+   Add default Ghana announcement languages
+========================================================= */
+
+router.post(
+  "/create-default-voice-languages",
+  authenticate,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id
+      } = req.body;
+
+
+      if(!hospital_id){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "hospital_id is required"
+
+        });
+
+      }
+
+
+
+      const defaultLanguages = [
+
+        {
+          hospital_id,
+          language_code:"en",
+          language_name:"English",
+          display_order:1,
+          enabled:true,
+        },
+
+        {
+          hospital_id,
+          language_code:"tw",
+          language_name:"Twi",
+          display_order:2,
+          enabled:true,
+        },
+
+        {
+          hospital_id,
+          language_code:"ga",
+          language_name:"Ga",
+          display_order:3,
+          enabled:true,
+        },
+
+        {
+          hospital_id,
+          language_code:"ee",
+          language_name:"Ewe",
+          display_order:4,
+          enabled:true,
+        },
+
+        {
+          hospital_id,
+          language_code:"dag",
+          language_name:"Dagbani",
+          display_order:5,
+          enabled:true,
+        },
+
+        {
+          hospital_id,
+          language_code:"ha",
+          language_name:"Hausa",
+          display_order:6,
+          enabled:true,
+        },
+
+      ];
+
+
+
+      const {
+        data,
+        error
+      }
+      =
+      await supabaseAdmin
+      .from(
+        "hospital_announcement_languages"
+      )
+      .upsert(
+        defaultLanguages,
+        {
+          onConflict:
+          "hospital_id,language_code"
+        }
+      )
+      .select();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        message:
+        "Default voice languages created",
+
+        languages:
+        data
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Create voice languages error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:
+        err.message
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   DELETE VOICE RECORDING
+   Remove hospital voice file record
+========================================================= */
+
+router.delete(
+  "/voice-recordings/:id",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      const {
+        id
+      } = req.params;
+
+
+      if(!id){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "Voice recording id required"
+
+        });
+
+      }
+
+
+      const {
+        data: recording,
+        error: findError
+      }
+      =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_recordings"
+      )
+      .select("*")
+      .eq(
+        "id",
+        id
+      )
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      )
+      .maybeSingle();
+
+
+
+      if(findError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          findError.message
+
+        });
+
+      }
+
+
+
+      if(!recording){
+
+        return res.status(404).json({
+
+          success:false,
+
+          error:
+          "Voice recording not found"
+
+        });
+
+      }
+
+
+
+      const {
+        error: deleteError
+      }
+      =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_recordings"
+      )
+      .delete()
+      .eq(
+        "id",
+        id
+      )
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      );
+
+
+
+      if(deleteError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          deleteError.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        message:
+        "Voice recording deleted"
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Delete voice error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:
+        err.message
+
+      });
+
+    }
 
   }
 );
