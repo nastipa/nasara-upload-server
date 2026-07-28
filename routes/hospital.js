@@ -3446,6 +3446,100 @@ return res.json({
 
   }
 );
+/* =========================================================
+   GET STAFF PROFILE
+========================================================= */
+
+router.get(
+  "/staff-profile",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req,res)=>{
+
+    try {
+
+      const staffId =
+        req.staff.id;
+
+
+      const {
+        data:staff,
+        error
+      } =
+      await supabaseAdmin
+      .from("hospital_department_staff")
+      .select(`
+        id,
+        full_name,
+        role,
+        department_id,
+        hospital_id,
+
+        hospital_departments(
+          name
+        ),
+
+        hospitals(
+          name
+        )
+
+      `)
+      .eq(
+        "id",
+        staffId
+      )
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+          success:false,
+          error:error.message
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        staff:{
+          id:staff.id,
+
+          name:
+          staff.full_name,
+
+          role:
+          staff.role,
+
+          department:
+          staff.hospital_departments?.name,
+
+          hospital:
+          staff.hospitals?.name
+        }
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(err);
+
+      res.status(500).json({
+        success:false,
+        error:err.message
+      });
+
+    }
+
+  }
+);
 
 /* =========================================================
    TODAY'S DEPARTMENT QUEUE
