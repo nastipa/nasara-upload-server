@@ -7025,12 +7025,12 @@ router.post(
   departmentStaffAuth,
   async (req, res) => {
     try {
-console.log("DEPARTMENT STAFF:", req.departmentStaff);
+
      const hospitalId =
   req.departmentStaff.hospital_id;
 
 const staffId =
-  req.departmentStaff.id;
+  req.user.id;
 
       const {
         booking_id,
