@@ -5646,26 +5646,31 @@ if (status === "called") {
   // Queue voice announcement
   await supabaseAdmin
     .from("hospital_voice_queue")
-    .insert({
-      hospital_id: booking.hospital_id,
+     .insert({
 
-      booking_id: booking.id,
+    hospital_id: booking.hospital_id,
 
-      department_id: booking.department_id,
+    booking_id: booking.id,
 
-      patient_id: booking.patient_id,
+    department_id: booking.department_id,
 
-      queue_number: booking.queue_number,
+    patient_id: booking.patient_id,
 
-      message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
+    queue_number: booking.queue_number,
 
-      language: "en",
-      recording_id:null,
+    message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
 
-      priority: booking.priority_level || 3,
+    language: "en",
 
-      played: false,
-    });
+    audio_type: "tts",
+
+    audio_url: null,
+
+    priority: booking.priority_level || 3,
+
+    played: false,
+
+  });
 
   notifyNextPatients(
     booking.hospital_id,
