@@ -5169,7 +5169,7 @@ router.get(
     try {
 
       const hospitalId =
-        req.hospitalStaff.hospital_id;
+        req.staff.hospital_id;
 
 
       const { data, error } =
