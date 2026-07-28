@@ -9373,7 +9373,6 @@ router.post(
   "/upload-voice-recording",
   authenticate,
   departmentStaffAuth,
-  upload.single("audio"),
   async (req, res) => {
 
     try {
