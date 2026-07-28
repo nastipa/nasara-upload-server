@@ -10,7 +10,6 @@ const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
 const notifyUser = require("./services/notifyUser");
 
-
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -71,6 +70,121 @@ app.post("/upload", upload.single("file"), async (req, res) => {
     });
   }
 });
+/* ================= VOICE RECORDING UPLOAD ================= */
+
+app.post(
+  "/upload-voice-recording",
+  upload.single("file"),
+  async (req, res) => {
+
+    try {
+
+      const file = req.file;
+
+
+      if (!file) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "No voice file uploaded"
+
+        });
+
+      }
+
+
+      // only audio files
+      if (!file.mimetype.startsWith("audio")) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          "Only audio files are allowed"
+
+        });
+
+      }
+
+
+      const fileName =
+        "voice-recordings/" +
+        Date.now() +
+        "-" +
+        file.originalname;
+
+
+
+      const params = {
+
+        Bucket:
+          process.env.R2_BUCKET,
+
+        Key:
+          fileName,
+
+        Body:
+          file.buffer,
+
+        ContentType:
+          file.mimetype,
+
+      };
+
+
+
+      await s3
+        .upload(params)
+        .promise();
+
+
+
+      const publicUrl =
+        `https://${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+
+
+
+      return res.json({
+
+        success:true,
+
+        audio_url:
+          publicUrl,
+
+        key:
+          fileName,
+
+      });
+
+
+
+    } catch(err){
+
+
+      console.log(
+        "Voice upload error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:
+          err.message
+
+      });
+
+
+    }
+
+  }
+);
 /* ================= CREATE ADMIN ================= */
 app.post("/create-admin", async (req, res) => {
   try {

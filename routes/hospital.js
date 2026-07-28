@@ -9241,9 +9241,157 @@ router.get(
 
   }
 );
+/* =========================================================
+   GET DEPARTMENT VOICE SETTINGS
+   Gets available announcement languages
+   and templates for a department
+========================================================= */
+
+router.get(
+  "/department-voice-settings",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
+
+
+      const {
+        data: languages,
+        error: languageError
+      } =
+      await supabaseAdmin
+        .from(
+          "hospital_announcement_languages"
+        )
+        .select(`
+          id,
+          language_code,
+          language_name,
+          enabled,
+          display_order
+        `)
+        .eq(
+          "hospital_id",
+          hospital_id
+        )
+        .eq(
+          "enabled",
+          true
+        )
+        .order(
+          "display_order",
+          {
+            ascending:true,
+          }
+        );
+
+
+      if(languageError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          languageError.message
+
+        });
+
+      }
 
 
 
+      const {
+        data: templates,
+        error: templateError
+      } =
+      await supabaseAdmin
+        .from(
+          "hospital_announcement_templates"
+        )
+        .select(`
+          id,
+          language_code,
+          template_name,
+          template_text,
+          enabled
+        `)
+        .eq(
+          "hospital_id",
+          hospital_id
+        )
+        .eq(
+          "enabled",
+          true
+        )
+        .order(
+          "template_name",
+          {
+            ascending:true,
+          }
+        );
+
+
+      if(templateError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:
+          templateError.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        hospital_id,
+
+        department_id,
+
+        languages:
+          languages || [],
+
+        templates:
+          templates || []
+
+      });
+
+
+
+    }catch(err){
+
+      console.log(
+        "Voice settings error:",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:
+        err.message
+
+      });
+
+    }
+
+  }
+);
 
 
 /* =========================================================
