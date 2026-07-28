@@ -8572,11 +8572,6 @@ router.post(
           registered_by_type:
             "department_staff",
 
-
-          hospital_id:
-            staff.hospital_id,
-
-
         })
         .select()
         .single();
