@@ -5157,18 +5157,19 @@ router.post(
   }
 );
 /* =========================================================
-   GET HOSPITAL DEPARTMENTS
+   GET HOSPITAL DEPARTMENTS FOR STAFF
 ========================================================= */
 
 router.get(
   "/departments",
   authenticate,
-  hospitalAdminAuth,
+  hospitalStaffAuth,
   async (req, res) => {
+
     try {
 
       const hospitalId =
-        req.hospitalAdmin.hospital_id;
+        req.hospitalStaff.hospital_id;
 
 
       const { data, error } =
@@ -5196,7 +5197,10 @@ router.get(
 
     } catch(err) {
 
-      console.log(err);
+      console.log(
+        "Get departments error:",
+        err
+      );
 
       return res.status(500).json({
         success:false,
@@ -5204,6 +5208,7 @@ router.get(
       });
 
     }
+
   }
 );
 /* =========================================================
