@@ -648,7 +648,17 @@ router.post("/join-queue", authenticate, async (req, res) => {
         .eq("user_id", req.user.id)
         .eq("status", "approved")
         .maybeSingle();
+    const { data: staff } =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select("hospital_id")
+.eq("user_id", req.user.id)
+.eq("active", true)
+.eq("status","approved")
+.maybeSingle();
 
+
+const isHospitalStaff = !!staff;
     const isHospitalAdmin = !!admin;
 
     let hospital_id;
@@ -659,9 +669,12 @@ router.post("/join-queue", authenticate, async (req, res) => {
     // HOSPITAL ADMIN BOOKING
     // ==============================
 
-    if (isHospitalAdmin) {
+   if (isHospitalAdmin || isHospitalStaff) {
 
-      hospital_id = admin.hospital_id;
+hospital_id =
+  isHospitalAdmin
+    ? admin.hospital_id
+    : staff.hospital_id;
 
       if (!patient_record_id) {
         return res.status(400).json({
@@ -882,10 +895,9 @@ queuePosition *
 
 let finalPriority;
 
-
-// Hospital admin/reception booking
+// Hospital admin and department staff booking
 if (
-  isHospitalAdmin &&
+  (isHospitalAdmin || isHospitalStaff) &&
   priority_case
 ) {
 
@@ -1130,10 +1142,10 @@ await savePatientJourney({
   action: "Joined Queue",
 
   notes: `Patient joined ${department.name} queue`,
-  performed_by: isHospitalAdmin
+  performed_by:
+  (isHospitalAdmin || isHospitalStaff)
     ? req.user.id
     : queuePatientId,
-
 });
 
 
