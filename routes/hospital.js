@@ -7026,11 +7026,11 @@ router.post(
   async (req, res) => {
     try {
 
-      const hospitalId =
-  req.hospitalStaff.hospital_id;
+     const hospitalId =
+  req.departmentStaff.hospital_id;
 
 const staffId =
-  req.hospitalStaff.id;
+  req.departmentStaff.id;
 
       const {
         booking_id,
