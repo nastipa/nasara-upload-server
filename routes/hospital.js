@@ -9833,7 +9833,7 @@ await supabaseAdmin
 )
 
 .select(
-"hospital_id"
+"hospital_id, department_id"
 )
 
 .eq(
@@ -9882,7 +9882,8 @@ await supabaseAdmin
 hospital_id:
 staff.hospital_id,
 
-
+department_id:
+staff.department_id,
 language,
 
 template_type,
