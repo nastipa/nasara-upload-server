@@ -7514,13 +7514,27 @@ router.post(
         });
 
       }
-      /* --------------------------------
-         CREATE VOICE ANNOUNCEMENT
-      -------------------------------- */
+     /* --------------------------------
+   GET DEPARTMENT VOICE TEMPLATE
+-------------------------------- */
+
+const { data: template } =
+await supabaseAdmin
+.from("hospital_voice_templates")
+.select("audio_url")
+.eq("hospital_id", hospitalId)
+.eq("department_id", departmentId)
+.eq("language", booking.language || "tw")
+.eq("active", true)
+.maybeSingle();
+
+/* --------------------------------
+   CREATE VOICE ANNOUNCEMENT
+-------------------------------- */
+
 await supabaseAdmin
 .from("hospital_voice_queue")
 .insert([
-
 {
   hospital_id: hospitalId,
 
@@ -7553,17 +7567,16 @@ await supabaseAdmin
 
   queue_number: booking.queue_number,
 
-  language:
-    booking.language || "tw",
+  language: booking.language || "tw",
 
   audio_type: "template",
 
-  message:
-    "Please proceed to your consultation room.",
+  audio_url: template?.audio_url || null,
+
+  message: "Please proceed to your consultation room.",
 
   played: false,
 }
-
 ]);
 
       /* --------------------------------
