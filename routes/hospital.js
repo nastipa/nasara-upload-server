@@ -7518,28 +7518,34 @@ router.post(
          CREATE VOICE ANNOUNCEMENT
       -------------------------------- */
 
-      await supabaseAdmin
-      .from("hospital_voice_queue")
-      .insert({
+     await supabaseAdmin
+.from("hospital_voice_queue")
+.insert({
 
-        hospital_id: hospitalId,
+  hospital_id: hospitalId,
 
-        department_id: departmentId,
+  department_id: departmentId,
 
-        booking_id: booking.id,
+  booking_id: booking.id,
 
-        queue_number:
-          booking.queue_number,
+  queue_number: booking.queue_number,
 
-        message:
-          `Queue ${booking.queue_number}, please proceed to ${req.staff.department_name}.`,
+  department_name: req.staff.department_name,
 
-        status: "pending",
+  language: booking.language || "en",
 
-        created_at:
-          new Date().toISOString(),
+  message:
+    `Queue ${booking.queue_number}, please proceed to ${req.staff.department_name}.`,
 
-      });
+  audio_type: "template",
+
+  played: false,
+
+  status: "pending",
+
+  created_at: new Date().toISOString(),
+
+});
 
       /* --------------------------------
          CREATE PATIENT NOTIFICATION
