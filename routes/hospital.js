@@ -9697,9 +9697,13 @@ router.get(
         department_id,
       } = req.departmentStaff;
 
+
       const {
         language = "en",
+        template_type = "queue_call",
       } = req.query;
+
+
 
       const {
         data,
@@ -9709,16 +9713,37 @@ router.get(
       .from("hospital_voice_templates")
       .select(`
         id,
+        hospital_id,
+        department_id,
         language,
+        template_type,
         audio_url,
         active,
         updated_at
       `)
-      .eq("hospital_id", hospital_id)
-      .eq("department_id", department_id)
-      .eq("language", language)
-      .eq("active", true)
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      )
+      .eq(
+        "language",
+        language
+      )
+      .eq(
+        "template_type",
+        template_type
+      )
+      .eq(
+        "active",
+        true
+      )
       .maybeSingle();
+
+
 
       if (error) {
 
@@ -9732,6 +9757,8 @@ router.get(
 
       }
 
+
+
       return res.json({
 
         success: true,
@@ -9740,12 +9767,16 @@ router.get(
 
       });
 
+
+
     } catch (err) {
+
 
       console.log(
         "Get voice template error:",
         err
       );
+
 
       return res.status(500).json({
 
@@ -9755,339 +9786,126 @@ router.get(
 
       });
 
+
     }
 
   }
 );
-/*
-================================================
-UPLOAD VOICE TEMPLATE
-================================================
-*/
-
-router.post(
-"/upload-voice-template",
-authenticate,
-async(req,res)=>{
-
-
-try{
-
-
-const userId =
-req.user.id;
-
-
-
-const {
-
-language,
-
-template_type,
-
-audio_url
-
-}
-=
-req.body;
-
-
-
-
-if(
-!language ||
-!template_type ||
-!audio_url
-){
-
-return res.status(400).json({
-
-success:false,
-
-error:"Missing template information"
-
-});
-
-}
-
-
-
-
-
-/*
-===========================
-GET HOSPITAL
-===========================
-*/
-
-
-const {
-data:staff,
-error
-}
-=
-await supabaseAdmin
-
-.from(
-"hospital_department_staff"
-)
-
-.select(
-"hospital_id, department_id"
-)
-
-.eq(
-"user_id",
-userId
-)
-
-.single();
-
-
-
-
-
-if(error || !staff){
-
-
-return res.status(403).json({
-
-success:false,
-
-error:"Hospital staff not found"
-
-});
-
-
-}
-
-
-
-
-
-
-const {
-data,
-error:insertError
-}
-=
-await supabaseAdmin
-
-.from(
-"hospital_voice_templates"
-)
-
-.insert({
-
-hospital_id:
-staff.hospital_id,
-
-department_id:
-staff.department_id,
-language,
-
-template_type,
-
-audio_url,
-
-
-})
-
-.select()
-.single();
-
-
-
-
-
-
-
-if(insertError){
-
-throw insertError;
-
-}
-
-
-
-
-
-return res.json({
-
-success:true,
-
-template:data
-
-});
-
-
-
-
-
-}
-catch(error){
-
-
-console.log(
-"VOICE TEMPLATE ERROR",
-error
-);
-
-
-
-res.status(500).json({
-
-success:false,
-
-error:error.message
-
-});
-
-
-}
-
-
-});
 
 /* =========================================================
-  VOICE TEMPLATE
+   UPLOAD VOICE TEMPLATE
 ========================================================= */
 
-router.get(
-"/voice-template",
-authenticate,
-async(req,res)=>{
+router.post(
+  "/upload-voice-template",
+  authenticate,
+  departmentStaffAuth,
+  async (req, res) => {
 
+    try {
 
-try{
+      const {
+        hospital_id,
+        department_id,
+      } = req.departmentStaff;
 
 
-const {
+      const {
+        language,
+        template_type,
+        audio_url,
+      } = req.body;
 
-language,
 
-template_type
 
-}
+      if (
+        !language ||
+        !template_type ||
+        !audio_url
+      ) {
 
-=
-req.query;
+        return res.status(400).json({
 
+          success:false,
 
+          error:"Missing template information"
 
+        });
 
+      }
 
-const userId =
-req.user.id;
 
 
+      const {
+        data,
+        error
+      } =
+      await supabaseAdmin
+      .from(
+        "hospital_voice_templates"
+      )
+      .insert({
 
+        hospital_id,
 
+        department_id,
 
+        language,
 
-const {
-data:staff
-}
-=
-await supabaseAdmin
+        template_type,
 
-.from(
-"hospital_department_staff"
-)
+        audio_url,
 
-.select(
-"hospital_id"
-)
+        active:true
 
-.eq(
-"user_id",
-userId
-)
+      })
+      .select()
+      .single();
 
-.single();
 
 
+      if(error){
 
+        throw error;
 
+      }
 
 
 
-const {
-data:template,
-error
-}
-=
-await supabaseAdmin
+      return res.json({
 
-.from(
-"hospital_voice_templates"
-)
+        success:true,
 
-.select("*")
+        template:data
 
-.eq(
-"hospital_id",
-staff.hospital_id
-)
+      });
 
-.eq(
-"language",
-language
-)
 
-.eq(
-"template_type",
-template_type
-)
 
-.maybeSingle();
+    }
+    catch(error){
 
 
+      console.log(
+        "Upload voice template error:",
+        error
+      );
 
 
+      return res.status(500).json({
 
+        success:false,
 
+        error:error.message
 
+      });
 
-if(error){
 
-throw error;
+    }
 
-}
+  }
+);
 
-
-
-
-
-res.json({
-
-success:true,
-
-template
-
-});
-
-
-
-
-
-}
-catch(error){
-
-
-res.status(500).json({
-
-success:false,
-
-error:error.message
-
-});
-
-
-}
-
-
-});
 /* =========================================================
    GET VOICE RECORDINGS
    Hospital staff list available announcement voices
