@@ -9180,7 +9180,11 @@ router.get(
   audio_url,
   audio_type,
   department_id,
-  created_at
+  created_at,
+  hospital_departments (
+    id,
+    name
+  )
 `)
           .eq(
             "hospital_id",
