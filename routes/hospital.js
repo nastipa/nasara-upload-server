@@ -9680,6 +9680,7 @@ router.post(
 
   }
 );
+
 /* =========================================================
    GET VOICE TEMPLATE
 ========================================================= */
@@ -9905,6 +9906,89 @@ router.post(
 
   }
 );
+/* =========================================================
+   MY VOICE TEMPLATES
+========================================================= */
+router.get(
+"/voice-templates",
+authenticate,
+departmentStaffAuth,
+async(req,res)=>{
+
+try{
+
+const {
+hospital_id,
+department_id
+}
+=
+req.departmentStaff;
+
+
+const {
+data,
+error
+}
+=
+await supabaseAdmin
+.from("hospital_voice_templates")
+.select(`
+id,
+language,
+template_type,
+audio_url,
+active,
+updated_at
+`)
+.eq(
+"hospital_id",
+hospital_id
+)
+.eq(
+"department_id",
+department_id
+)
+.order(
+"created_at",
+{
+ascending:false
+}
+);
+
+
+if(error){
+
+return res.status(400).json({
+success:false,
+error:error.message
+});
+
+}
+
+
+return res.json({
+
+success:true,
+
+templates:data || []
+
+});
+
+
+}
+catch(error){
+
+return res.status(500).json({
+
+success:false,
+
+error:error.message
+
+});
+
+}
+
+});
 
 /* =========================================================
    GET VOICE RECORDINGS
