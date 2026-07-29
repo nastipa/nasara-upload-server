@@ -7534,8 +7534,11 @@ router.post(
 
   language: booking.language || "en",
 
-  message:
-    `Queue ${booking.queue_number}, please proceed to ${req.staff.department_name}.`,
+ message:   
+ "Please proceed to your consultation room.",
+
+english_announcement:
+`${req.staff.department_name} Queue Number ${booking.queue_number}.`,
 
   audio_type: "template",
 
@@ -9176,10 +9179,11 @@ router.get(
       const { data, error } =
         await supabaseAdmin
           .from("hospital_voice_queue")
-         .select(`
+        .select(`
   id,
   booking_id,
   queue_number,
+  english_announcement,
   message,
   language,
   priority,

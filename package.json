@@ -15,9 +15,11 @@
     "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@supabase/supabase-js": "^2.103.3",
     "aws-sdk": "^2.1693.0",
+    "axios": "^1.19.0",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "google-tts-api": "^2.0.2",
     "multer": "^2.1.1",
     "node-fetch": "^3.3.2",
     "pdfkit": "^0.19.1"
