@@ -5679,19 +5679,35 @@ await supabaseAdmin
 .maybeSingle();
 
 /* --------------------------------
-   CREATE VOICE ANNOUNCEMENT
--------------------------------- */
-
-/* --------------------------------
    CREATE MULTI LANGUAGE VOICE QUEUE
 -------------------------------- */
+
+// Get department name
+const {
+  data: department
+} =
+await supabaseAdmin
+.from("hospital_departments")
+.select("name")
+.eq(
+  "id",
+  booking.department_id
+)
+.maybeSingle();
+
+
+
+const departmentName =
+department?.name || "Department";
+
 
 
 // 1. Get department selected languages
 
 const {
   data: departmentLanguages
-} =
+}
+=
 await supabaseAdmin
 .from("hospital_department_languages")
 .select(`
@@ -5720,6 +5736,7 @@ await supabaseAdmin
 
 
 const voiceQueue = [];
+
 
 
 // 2. Always create English computer announcement first
@@ -5751,7 +5768,7 @@ voiceQueue.push({
     null,
 
   message:
-    `${req.staff.department_name} Queue Number ${booking.queue_number}`,
+    `${departmentName} Queue Number ${booking.queue_number}`,
 
   priority:
     booking.priority_level || 3,
@@ -5762,20 +5779,24 @@ voiceQueue.push({
 
 
 
-// 3. Add local language recordings
+
+// 3. Add selected local language recordings
 
 for(
- const item of departmentLanguages || []
+  const item of departmentLanguages || []
 ){
 
+  // English already created above
   if(item.language === "en"){
     continue;
   }
 
 
+
   const {
     data: template
-  } =
+  }
+  =
   await supabaseAdmin
   .from("hospital_voice_templates")
   .select(`
@@ -5802,7 +5823,8 @@ for(
 
 
 
-  if(template){
+  if(template?.audio_url){
+
 
     voiceQueue.push({
 
@@ -5821,39 +5843,70 @@ for(
       queue_number:
         booking.queue_number,
 
+
       language:
         template.language,
+
 
       audio_type:
         "template",
 
+
       audio_url:
         template.audio_url,
+
 
       message:
         "Please proceed to your consultation room.",
 
+
       priority:
         booking.priority_level || 3,
+
 
       played:false,
 
     });
 
+
   }
+
 
 }
 
 
 
-// 4. Save all announcements
 
-await supabaseAdmin
-.from("hospital_voice_queue")
-.insert(
-  voiceQueue
-);
-  notifyNextPatients(
+// 4. Insert all voice announcements
+
+if(voiceQueue.length > 0){
+
+  const {
+    error: voiceError
+  }
+  =
+  await supabaseAdmin
+  .from("hospital_voice_queue")
+  .insert(
+    voiceQueue
+  );
+
+
+  if(voiceError){
+
+    console.log(
+      "VOICE QUEUE INSERT ERROR",
+      voiceError
+    );
+
+  }
+
+}
+  
+/* --------------------------------
+   NOTIFY THE NEXT PATIENT
+-------------------------------- */
+notifyNextPatients(
     booking.hospital_id,
     booking.department_id,
     booking.booking_date
