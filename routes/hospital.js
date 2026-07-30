@@ -7515,27 +7515,35 @@ router.post(
 
       }
      /* --------------------------------
-   GET DEPARTMENT VOICE TEMPLATE
+   GET LOCAL LANGUAGE TEMPLATE
 -------------------------------- */
 
 const { data: template } =
 await supabaseAdmin
 .from("hospital_voice_templates")
-.select("audio_url")
+.select(`
+  audio_url,
+  language
+`)
 .eq("hospital_id", hospitalId)
 .eq("department_id", departmentId)
-.eq("language", booking.language || "tw")
+.eq(
+  "language",
+  booking.language || "tw"
+)
 .eq("active", true)
 .maybeSingle();
 
+
+
 /* --------------------------------
-   CREATE VOICE ANNOUNCEMENT
+   CREATE SINGLE VOICE ANNOUNCEMENT
 -------------------------------- */
 
 await supabaseAdmin
 .from("hospital_voice_queue")
-.insert([
-{
+.insert({
+
   hospital_id: hospitalId,
 
   department_id: departmentId,
@@ -7546,38 +7554,24 @@ await supabaseAdmin
 
   queue_number: booking.queue_number,
 
-  language: "en",
+  language:
+    template?.language ||
+    booking.language ||
+    "en",
 
-  audio_type: "tts",
+  audio_type: "template",
+
+  audio_url:
+    template?.audio_url || null,
 
   message:
     `${req.staff.department_name} Queue Number ${booking.queue_number}`,
 
-  played: false,
-},
+  played:false,
 
-{
-  hospital_id: hospitalId,
+});
 
-  department_id: departmentId,
 
-  booking_id: booking.id,
-
-  patient_id: booking.patient_id,
-
-  queue_number: booking.queue_number,
-
-  language: booking.language || "tw",
-
-  audio_type: "template",
-
-  audio_url: template?.audio_url || null,
-
-  message: "Please proceed to your consultation room.",
-
-  played: false,
-}
-]);
 
       /* --------------------------------
          CREATE PATIENT NOTIFICATION
@@ -9212,7 +9206,6 @@ router.get(
   id,
   booking_id,
   queue_number,
-  english_announcement,
   message,
   language,
   priority,
