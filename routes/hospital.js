@@ -10927,104 +10927,114 @@ router.delete(
   }
 );
 /* =========================================================
-   DELETE HOSPITAL DEPARTMENT
+   DELETE VOICE TEMPLATE
 ========================================================= */
 
 router.delete(
-  "/delete-department/:id",
+  "/delete-voice-template/:id",
   authenticate,
-  hospitalAdminAuth,
+  departmentStaffAuth,
   async (req, res) => {
+
     try {
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
 
-      const { id } = req.params;
+      const {
+        hospital_id,
+        department_id
+      } = req.departmentStaff;
 
-      const { data: department } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .select("*")
-          .eq("id", id)
-          .eq("hospital_id", hospitalId)
-          .maybeSingle();
 
-      if (!department) {
-        return res.status(404).json({
-          success: false,
-          error: "Department not found.",
-        });
-      }
-     const { count: activeBookings } =
-  await supabaseAdmin
-    .from("hospital_bookings")
-    .select("*", {
-      count: "exact",
-      head: true,
-    })
-    .eq("department_id", id)
-    .in("status", [
-      "waiting",
-      "called",
-      "checked_in",
-    ]);
+      const {
+        id
+      } = req.params;
 
-if ((activeBookings || 0) > 0) {
 
-  return res.status(400).json({
-    success: false,
-    error:
-      "This department cannot be deleted because patients are still assigned to it.",
-  });
+      const {
+        data: template,
+        error: findError
+      } =
+      await supabaseAdmin
+      .from("hospital_voice_templates")
+      .select("id")
+      .eq("id", id)
+      .eq("hospital_id", hospital_id)
+      .eq("department_id", department_id)
+      .maybeSingle();
 
-}
-     const { count: staffCount } =
-await supabaseAdmin
-.from("hospital_department_staff")
-.select("*", {
-  count: "exact",
-  head: true,
-})
-.eq("department_id", id)
-.eq("active", true);
 
-if ((staffCount || 0) > 0) {
-  return res.status(400).json({
-    success:false,
-    error:"Department still has active staff."
-  });
-}
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_departments")
-          .update({
-            is_active: false,
-          })
-          .eq("id", id)
-          .select()
-          .single();
+      if(findError){
 
-      if (error) {
         return res.status(400).json({
-          success: false,
-          error: error.message,
+          success:false,
+          error:findError.message
         });
+
       }
+
+
+      if(!template){
+
+        return res.status(404).json({
+          success:false,
+          error:"Voice template not found"
+        });
+
+      }
+
+
+
+      const {
+        error
+      } =
+      await supabaseAdmin
+      .from("hospital_voice_templates")
+      .delete()
+      .eq("id", id)
+      .eq("hospital_id", hospital_id)
+      .eq("department_id", department_id);
+
+
+
+      if(error){
+
+        return res.status(400).json({
+          success:false,
+          error:error.message
+        });
+
+      }
+
+
 
       return res.json({
-        success: true,
-        message: "Department deleted successfully.",
-        department: data,
+
+        success:true,
+
+        message:
+        "Voice template deleted"
+
       });
 
-    } catch (err) {
-      console.log(err);
+
+    }
+    catch(err){
+
+      console.log(
+        "DELETE VOICE TEMPLATE ERROR:",
+        err
+      );
+
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:err.message
+
       });
+
     }
+
   }
 );
 /* =========================================================
