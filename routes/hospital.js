@@ -5644,34 +5644,57 @@ if (status === "called") {
     .eq("id", booking.department_id);
 
   // Queue voice announcement
-  await supabaseAdmin
-    .from("hospital_voice_queue")
-     .insert({
+  /* --------------------------------
+   GET LOCAL LANGUAGE TEMPLATE
+-------------------------------- */
 
-    hospital_id: booking.hospital_id,
+const { data: template } =
+await supabaseAdmin
+.from("hospital_voice_templates")
+.select(`
+  audio_url,
+  language
+`)
+.eq("hospital_id", booking.hospital_id)
+.eq("department_id", booking.department_id)
+.eq("active", true)
+.maybeSingle();
 
-    booking_id: booking.id,
+/* --------------------------------
+   CREATE VOICE ANNOUNCEMENT
+-------------------------------- */
 
-    department_id: booking.department_id,
+await supabaseAdmin
+.from("hospital_voice_queue")
+.insert({
 
-    patient_id: booking.patient_id,
+  hospital_id: booking.hospital_id,
 
-    queue_number: booking.queue_number,
+  booking_id: booking.id,
 
-    message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
+  department_id: booking.department_id,
 
-    language: "en",
+  patient_id: booking.patient_id,
 
-    audio_type: "tts",
+  queue_number: booking.queue_number,
 
-    audio_url: null,
+  message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
 
-    priority: booking.priority_level || 3,
+  language:
+    template?.language || "en",
 
-    played: false,
+  audio_type:
+    template ? "template" : "tts",
 
-  });
+  audio_url:
+    template?.audio_url || null,
 
+  priority:
+    booking.priority_level || 3,
+
+  played: false,
+
+});
   notifyNextPatients(
     booking.hospital_id,
     booking.department_id,
