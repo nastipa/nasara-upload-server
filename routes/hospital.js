@@ -1627,7 +1627,7 @@ router.get(
         .order(
           "queue_position",
           {
-            ascending:true
+            ascending:false
           }
         );
 
@@ -3638,7 +3638,7 @@ router.get(
           ascending: true,
         })
         .order("created_at", {
-          ascending: true,
+          ascending: false,
         });
 
       if (error) {
@@ -5735,58 +5735,31 @@ await supabaseAdmin
 
 
 
-const voiceQueue = [];
+const voices = [];
 
 
+// 1. Always add English TTS
 
-// 2. Always create English computer announcement first
+voices.push({
 
-voiceQueue.push({
+  language: "en",
 
-  hospital_id:
-    booking.hospital_id,
+  audio_type: "tts",
 
-  booking_id:
-    booking.id,
-
-  department_id:
-    booking.department_id,
-
-  patient_id:
-    booking.patient_id,
-
-  queue_number:
-    booking.queue_number,
-
-  language:
-    "en",
-
-  audio_type:
-    "tts",
-
-  audio_url:
-    null,
-
-  message:
-    `${departmentName} Queue Number ${booking.queue_number}`,
-
-  priority:
-    booking.priority_level || 3,
-
-  played:false,
+  audio_url: null
 
 });
 
 
 
+// 2. Add all selected department languages
 
-// 3. Add selected local language recordings
-
-for(
+for (
   const item of departmentLanguages || []
-){
+) {
 
-  // English already created above
+
+  // English already added
   if(item.language === "en"){
     continue;
   }
@@ -5826,45 +5799,18 @@ for(
   if(template?.audio_url){
 
 
-    voiceQueue.push({
-
-      hospital_id:
-        booking.hospital_id,
-
-      booking_id:
-        booking.id,
-
-      department_id:
-        booking.department_id,
-
-      patient_id:
-        booking.patient_id,
-
-      queue_number:
-        booking.queue_number,
-
+    voices.push({
 
       language:
-        template.language,
+      template.language,
 
 
       audio_type:
-        "template",
+      "template",
 
 
       audio_url:
-        template.audio_url,
-
-
-      message:
-        "Please proceed to your consultation room.",
-
-
-      priority:
-        booking.priority_level || 3,
-
-
-      played:false,
+      template.audio_url
 
     });
 
@@ -5874,34 +5820,62 @@ for(
 
 }
 
+// 3. Insert single voice queue with multiple languages
+
+const {
+  error: voiceError
+}
+=
+await supabaseAdmin
+.from("hospital_voice_queue")
+.insert({
+
+  hospital_id:
+    booking.hospital_id,
 
 
+  booking_id:
+    booking.id,
 
-// 4. Insert all voice announcements
 
-if(voiceQueue.length > 0){
+  department_id:
+    booking.department_id,
 
-  const {
-    error: voiceError
-  }
-  =
-  await supabaseAdmin
-  .from("hospital_voice_queue")
-  .insert(
-    voiceQueue
+
+  patient_id:
+    booking.patient_id,
+
+
+  queue_number:
+    booking.queue_number,
+
+
+  message:
+    `${departmentName} Queue Number ${booking.queue_number}`,
+
+
+  voices,
+
+
+  priority:
+    booking.priority_level || 3,
+
+
+  played:false,
+
+});
+
+
+if(voiceError){
+
+  console.log(
+    "VOICE QUEUE INSERT ERROR",
+    voiceError
   );
 
-
-  if(voiceError){
-
-    console.log(
-      "VOICE QUEUE INSERT ERROR",
-      voiceError
-    );
-
-  }
-
 }
+
+
   
 /* --------------------------------
    NOTIFY THE NEXT PATIENT
@@ -9445,15 +9419,16 @@ router.get(
       const { data, error } =
         await supabaseAdmin
           .from("hospital_voice_queue")
-        .select(`
+        const { data, error } =
+await supabaseAdmin
+.from("hospital_voice_queue")
+.select(`
   id,
   booking_id,
   queue_number,
   message,
-  language,
+  voices,
   priority,
-  audio_url,
-  audio_type,
   department_id,
   created_at,
   hospital_departments (
@@ -9461,32 +9436,31 @@ router.get(
     name
   )
 `)
-          .eq(
-            "hospital_id",
-            hospital_id
-          )
-          .eq(
-            "department_id",
-            department_id
-          )
-          .eq(
-            "played",
-            false
-          )
-          .order(
-            "priority",
-            {
-              ascending:true,
-            }
-          )
-          .order(
-            "created_at",
-            {
-              ascending:true,
-            }
-          )
-         
-
+.eq(
+  "hospital_id",
+  hospital_id
+)
+.eq(
+  "department_id",
+  department_id
+)
+.eq(
+  "played",
+  false
+)
+.order(
+  "priority",
+  {
+    ascending:true
+  }
+)
+.order(
+  "created_at",
+  {
+    ascending:true
+  }
+)
+.limit(1);
 
       if(error){
 
@@ -9501,15 +9475,14 @@ router.get(
       }
 
 
-      return res.json({
+     return res.json({
 
- success:true,
+  success:true,
 
- announcements:
-   data || [],
+  announcement:
+    data?.[0] || null,
 
 });
-
     }catch(err){
 
       return res.status(500).json({
