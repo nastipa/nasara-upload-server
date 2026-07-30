@@ -4113,50 +4113,60 @@ req.departmentStaff.department_id;
 
 
 
-      const statistics = {
+     const statistics = {
 
-        waiting:
-        bookings.filter(
-          b=>b.status==="waiting"
-        ).length,
-
-
-        called:
-        bookings.filter(
-          b=>b.status==="called"
-        ).length,
+  waiting:
+  bookings.filter(
+    b=>b.status==="waiting"
+  ).length,
 
 
-        checked_in:
-        bookings.filter(
-          b=>b.status==="checked_in"
-        ).length,
+  called:
+  bookings.filter(
+    b=>b.status==="called"
+  ).length,
 
 
-        completed:
-        bookings.filter(
-          b=>b.status==="completed"
-        ).length,
+  consultation:
+  bookings.filter(
+    b=>b.status==="consultation"
+  ).length,
 
 
-        emergency:
-        bookings.filter(
-          b=>b.priority==="emergency"
-        ).length,
+  admitted:
+  bookings.filter(
+    b=>b.status==="admitted"
+  ).length,
 
 
-        urgent:
-        bookings.filter(
-          b=>b.priority==="urgent"
-        ).length,
+  discharged:
+  bookings.filter(
+    b=>b.status==="discharged"
+  ).length,
 
 
-        total_today:
-        bookings.length,
+  referred:
+  bookings.filter(
+    b=>b.status==="referred"
+  ).length,
 
-      };
+
+  transferred:
+  bookings.filter(
+    b=>b.status==="transferred"
+  ).length,
 
 
+  completed:
+  bookings.filter(
+    b=>b.status==="completed"
+  ).length,
+
+
+  total_today:
+  bookings.length,
+
+};
 
 
 
@@ -4167,7 +4177,7 @@ req.departmentStaff.department_id;
           (
             statistics.waiting +
             statistics.called +
-            statistics.checked_in
+            statistics.consultation
           )
           /
           Math.max(
@@ -4190,11 +4200,11 @@ req.departmentStaff.department_id;
 
 
       const currentPatient =
-      bookings.find(
-        b=>
-        b.status==="called"
-      ) || null;
-
+bookings.find(
+  b =>
+  b.status==="called" ||
+  b.status==="consultation"
+) || null;
 
 
 
@@ -4298,8 +4308,10 @@ req.departmentStaff.department_id;
           booking_code:
           currentPatient.booking_code,
 
-
-          patient_name:
+          department_name:
+           department.name,
+          
+           patient_name:
           currentPatient.patient_id
           ?
           userMap[
