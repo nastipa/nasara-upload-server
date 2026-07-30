@@ -5719,7 +5719,7 @@ await savePatientJourney({
         case "called":
           title = "It's Your Turn";
           body =
-            "Please proceed to the consultation room.";
+            "Please proceed to to assign department.";
           break;
 
         case "checked_in":
@@ -5843,11 +5843,8 @@ await supabaseAdmin
   queue_number:
     booking.queue_number,
 
-
-  message:
-    `${departmentName} Queue Number ${booking.queue_number}`,
-
-
+message:
+`${departmentName} Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
   voices,
 
 
@@ -7747,7 +7744,7 @@ await supabaseAdmin
   queue_number: booking.queue_number,
 
   message:
-    `${req.staff.department_name} Queue Number ${booking.queue_number}`,
+`${departmentName} Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
 
   voices,
 
@@ -7790,10 +7787,11 @@ if(voiceError){
           title:
             "You are being called",
 
-          message:
-            `Queue ${booking.queue_number}, please proceed to ${req.staff.department_name}.`,
+         message:
+`${departmentName} Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
 
-          type:
+          
+            type:
             "called",
 
           read:
@@ -7842,7 +7840,645 @@ if(voiceError){
   }
 
 );
+/* =========================================================
+   START CONSULTATION
+========================================================= */
 
+router.post(
+  "/start-consultation",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId =
+        req.staff.hospital_id;
+
+      const departmentId =
+        req.staff.department_id;
+
+      const staffId =
+        req.user.id;
+
+      const {
+        booking_id
+      } = req.body;
+
+      if (!booking_id) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error: "booking_id is required",
+
+        });
+
+      }
+
+      /* -----------------------------
+         FIND BOOKING
+      ----------------------------- */
+
+      const {
+        data: booking,
+        error: bookingError,
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .select("*")
+      .eq("id", booking_id)
+      .eq("hospital_id", hospitalId)
+      .eq("department_id", departmentId)
+      .maybeSingle();
+
+      if (bookingError) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error: bookingError.message,
+
+        });
+
+      }
+
+      if (!booking) {
+
+        return res.status(404).json({
+
+          success: false,
+
+          error: "Booking not found.",
+
+        });
+
+      }
+
+      if (booking.status !== "called") {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error:
+            "Only called patients can start consultation.",
+
+        });
+
+      }
+
+      /* -----------------------------
+         START CONSULTATION
+      ----------------------------- */
+
+      const {
+        data,
+        error,
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .update({
+
+        status: "consultation",
+
+        current_stage:
+          "consultation",
+
+        consultation_started_at:
+          new Date().toISOString(),
+
+        consulted_by:
+          staffId,
+
+      })
+      .eq("id", booking.id)
+      .select()
+      .single();
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error: error.message,
+
+        });
+
+      }
+
+      /* -----------------------------
+         PATIENT JOURNEY
+      ----------------------------- */
+
+      await supabaseAdmin
+      .from("hospital_patient_journey")
+      .insert({
+
+        booking_id:
+          booking.id,
+
+        hospital_id:
+          booking.hospital_id,
+
+        patient_id:
+          booking.patient_id,
+
+        patient_record_id:
+          booking.patient_record_id,
+
+        department_id:
+          booking.department_id,
+
+        event_type:
+          "consultation_started",
+
+        action:
+          "Consultation Started",
+
+        notes:
+          "Patient entered the consultation room.",
+
+        performed_by:
+          staffId,
+
+      });
+
+      /* -----------------------------
+         NOTIFICATION
+      ----------------------------- */
+
+      if (booking.patient_id) {
+
+        await supabaseAdmin
+        .from("hospital_notifications")
+        .insert({
+
+          hospital_id:
+            booking.hospital_id,
+
+          patient_id:
+            booking.patient_id,
+
+          booking_id:
+            booking.id,
+
+          title:
+            "Consultation Started",
+
+          message:
+            "Your consultation has started.",
+
+          type:
+            "consultation",
+
+          read:
+            false,
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        booking: data,
+
+      });
+
+    } catch (err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message,
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   DISCHARGE PATIENT
+========================================================= */
+
+router.post(
+  "/discharge-patient",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId = req.staff.hospital_id;
+      const departmentId = req.staff.department_id;
+
+      const {
+        booking_id,
+        notes,
+      } = req.body;
+
+      if (!booking_id) {
+
+        return res.status(400).json({
+          success:false,
+          error:"booking_id is required",
+        });
+
+      }
+
+      const {
+        data: booking,
+        error,
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .update({
+
+        status:"discharged",
+
+        current_stage:"completed",
+
+        discharged_at:
+          new Date().toISOString(),
+
+        completed_at:
+          new Date().toISOString(),
+
+      })
+      .eq("id", booking_id)
+      .eq("hospital_id", hospitalId)
+      .eq("department_id", departmentId)
+      .select()
+      .single();
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message,
+
+        });
+
+      }
+
+      await supabaseAdmin
+      .from("hospital_patient_journey")
+      .insert({
+
+        booking_id: booking.id,
+
+        hospital_id: booking.hospital_id,
+
+        patient_id: booking.patient_id,
+
+        patient_record_id: booking.patient_record_id,
+
+        department_id: booking.department_id,
+
+        event_type:"discharged",
+
+        action:"Patient Discharged",
+
+        notes:
+          notes || "Patient discharged.",
+
+        performed_by:req.user.id,
+
+      });
+
+      if (booking.patient_id) {
+
+        await supabaseAdmin
+        .from("hospital_notifications")
+        .insert({
+
+          hospital_id: booking.hospital_id,
+
+          patient_id: booking.patient_id,
+
+          booking_id: booking.id,
+
+          title:"Discharged",
+
+          message:"You have been discharged.",
+
+        });
+
+      }
+
+      return res.json({
+
+        success:true,
+
+        booking,
+
+      });
+
+    } catch (err) {
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message,
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   ADMIT PATIENT
+========================================================= */
+
+router.post(
+  "/admit-patient",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId = req.staff.hospital_id;
+      const departmentId = req.staff.department_id;
+
+      const {
+        booking_id,
+        ward,
+        bed_number,
+        notes,
+      } = req.body;
+
+      if (!booking_id) {
+
+        return res.status(400).json({
+          success:false,
+          error:"booking_id is required",
+        });
+
+      }
+
+      const {
+        data: booking,
+        error,
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .update({
+
+        status:"admitted",
+
+        current_stage:"admitted",
+
+        admitted_at:
+          new Date().toISOString(),
+
+      })
+      .eq("id", booking_id)
+      .eq("hospital_id", hospitalId)
+      .eq("department_id", departmentId)
+      .select()
+      .single();
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message,
+
+        });
+
+      }
+
+      await supabaseAdmin
+      .from("hospital_patient_journey")
+      .insert({
+
+        booking_id: booking.id,
+
+        hospital_id: booking.hospital_id,
+
+        patient_id: booking.patient_id,
+
+        patient_record_id: booking.patient_record_id,
+
+        department_id: booking.department_id,
+
+        event_type:"admitted",
+
+        action:"Patient Admitted",
+
+        notes:
+          notes ||
+          `Ward: ${ward || "-"}  Bed: ${bed_number || "-"}`,
+
+        performed_by:req.user.id,
+
+      });
+
+      if (booking.patient_id) {
+
+        await supabaseAdmin
+        .from("hospital_notifications")
+        .insert({
+
+          hospital_id: booking.hospital_id,
+
+          patient_id: booking.patient_id,
+
+          booking_id: booking.id,
+
+          title:"Hospital Admission",
+
+          message:
+            "You have been admitted.",
+
+        });
+
+      }
+
+      return res.json({
+
+        success:true,
+
+        booking,
+
+      });
+
+    } catch (err) {
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message,
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   REFER PATIENT
+========================================================= */
+
+router.post(
+  "/refer-patient",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const {
+        booking_id,
+        referral_hospital,
+        referral_department,
+        reason
+      } = req.body;
+
+      if (!booking_id) {
+        return res.status(400).json({
+          success: false,
+          error: "booking_id is required",
+        });
+      }
+
+      const {
+        data: booking,
+        error
+      } =
+      await supabaseAdmin
+      .from("hospital_bookings")
+      .update({
+
+        status: "referred",
+
+        current_stage: "referred",
+
+        referred_at:
+          new Date().toISOString(),
+
+        referral_hospital,
+
+        referral_department,
+
+        referral_reason: reason,
+
+      })
+      .eq("id", booking_id)
+      .select()
+      .single();
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error: error.message,
+
+        });
+
+      }
+
+      await supabaseAdmin
+      .from("hospital_patient_journey")
+      .insert({
+
+        booking_id: booking.id,
+
+        hospital_id: booking.hospital_id,
+
+        patient_id: booking.patient_id,
+
+        patient_record_id:
+          booking.patient_record_id,
+
+        department_id:
+          booking.department_id,
+
+        event_type: "referred",
+
+        action: "Patient Referred",
+
+        notes:
+          `Referred to ${referral_hospital}${referral_department ? " - " + referral_department : ""}${reason ? ". Reason: " + reason : ""}`,
+
+        performed_by:
+          req.user.id,
+
+      });
+
+      if (booking.patient_id) {
+
+        await supabaseAdmin
+        .from("hospital_notifications")
+        .insert({
+
+          hospital_id:
+            booking.hospital_id,
+
+          patient_id:
+            booking.patient_id,
+
+          booking_id:
+            booking.id,
+
+          title:
+            "Referral",
+
+          message:
+            `You have been referred to ${referral_hospital}.`,
+
+          type:
+            "referral",
+
+          read: false,
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        booking,
+
+      });
+
+    } catch (err) {
+
+      console.log(err);
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message,
+
+      });
+
+    }
+
+  }
+);
 /* =========================================================
    PATIENT JOURNEY
 ========================================================= */
