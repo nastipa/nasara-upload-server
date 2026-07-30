@@ -7540,6 +7540,15 @@ await supabaseAdmin
    CREATE SINGLE VOICE ANNOUNCEMENT
 -------------------------------- */
 
+console.log(
+  "NEW SINGLE VOICE ANNOUNCEMENT CODE RUNNING"
+);
+
+console.log(
+  "Template:",
+  template
+);
+
 await supabaseAdmin
 .from("hospital_voice_queue")
 .insert({
