@@ -9415,11 +9415,7 @@ router.get(
       } =
       req.departmentStaff;
 
-
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_voice_queue")
-        const { data, error } =
+ const { data, error } =
 await supabaseAdmin
 .from("hospital_voice_queue")
 .select(`
