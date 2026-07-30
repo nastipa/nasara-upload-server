@@ -7723,39 +7723,80 @@ router.post(
 
       }
      /* --------------------------------
-   GET LOCAL LANGUAGE TEMPLATE
+  /* --------------------------------
+   CREATE MULTI-LANGUAGE VOICE LIST
 -------------------------------- */
 
-const { data: template } =
+const {
+  data: departmentLanguages
+} =
 await supabaseAdmin
-.from("hospital_voice_templates")
+.from("hospital_department_languages")
 .select(`
-  audio_url,
-  language
+  language,
+  display_order
 `)
 .eq("hospital_id", hospitalId)
 .eq("department_id", departmentId)
-.eq(
-  "language",
-  booking.language || "tw"
-)
-.eq("active", true)
-.maybeSingle();
+.eq("enabled", true)
+.order("display_order", {
+  ascending: true
+});
 
+const voices = [];
 
+// Always announce the queue number first in English
+voices.push({
+
+  language: "en",
+
+  audio_type: "tts",
+
+  audio_url: null
+
+});
+
+// Add every enabled local language recording
+for (const item of departmentLanguages || []) {
+
+  if (item.language === "en") {
+    continue;
+  }
+
+  const {
+    data: template
+  } =
+  await supabaseAdmin
+  .from("hospital_voice_templates")
+  .select(`
+    language,
+    audio_url
+  `)
+  .eq("hospital_id", hospitalId)
+  .eq("department_id", departmentId)
+  .eq("language", item.language)
+  .eq("active", true)
+  .maybeSingle();
+
+  if (template?.audio_url) {
+
+    voices.push({
+
+      language: template.language,
+
+      audio_type: "template",
+
+      audio_url: template.audio_url
+
+    });
+
+  }
+
+}
 
 /* --------------------------------
-   CREATE SINGLE VOICE ANNOUNCEMENT
+   SAVE SINGLE VOICE ANNOUNCEMENT
 -------------------------------- */
-
-console.log(
-  "NEW SINGLE VOICE ANNOUNCEMENT CODE RUNNING"
-);
-
-console.log(
-  "Template:",
-  template
-);
 
 await supabaseAdmin
 .from("hospital_voice_queue")
@@ -7771,24 +7812,17 @@ await supabaseAdmin
 
   queue_number: booking.queue_number,
 
-  language:
-    template?.language ||
-    booking.language ||
-    "en",
-
-  audio_type: "template",
-
-  audio_url:
-    template?.audio_url || null,
-
   message:
-    `${req.staff.department_name} Queue Number ${booking.queue_number}`,
+   ` ${req.staff.department_name} Queue Number ${booking.queue_number}`,
 
-  played:false,
+  voices,
+
+  priority:
+    booking.priority_level || 3,
+
+  played: false
 
 });
-
-
 
       /* --------------------------------
          CREATE PATIENT NOTIFICATION
