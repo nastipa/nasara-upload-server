@@ -7712,19 +7712,37 @@ router.post(
 
 const {
   data: departmentLanguages
-} =
+}
+=
 await supabaseAdmin
 .from("hospital_department_languages")
 .select(`
   language,
   display_order
 `)
-.eq("hospital_id", hospitalId)
-.eq("department_id", departmentId)
-.eq("enabled", true)
-.order("display_order", {
-  ascending: true
-});
+.eq(
+  "hospital_id",
+  booking.hospital_id
+)
+.eq(
+  "department_id",
+  booking.department_id
+)
+.eq(
+  "enabled",
+  true
+)
+.order(
+  "display_order",
+  {
+    ascending:true
+  }
+);
+
+console.log(
+  "Department languages:",
+  departmentLanguages
+);
 
 const voices = [];
 
@@ -7742,6 +7760,13 @@ for (const item of departmentLanguages || []) {
       .eq("language", item.language)
       .eq("active", true)
       .maybeSingle();
+
+console.log(
+  "Language:",
+  item.language,
+  "Template:",
+  template
+);
 
   if (template?.audio_url) {
 
@@ -9879,24 +9904,44 @@ router.post(
 
       if (error) {
 
-        return res.status(400).json({
+  return res.status(400).json({
 
-          success: false,
+    success: false,
 
-          error: error.message,
+    error: error.message,
 
-        });
+  });
 
-      }
+}
 
-      return res.json({
+/*
+========================================
+AUTO-ENABLE THIS LANGUAGE FOR DEPARTMENT
+========================================
+*/
 
-        success: true,
+await supabaseAdmin
+  .from("hospital_department_languages")
+  .upsert(
+    {
+      hospital_id,
+      department_id,
+      language,
+      enabled: true,
+    },
+    {
+      onConflict:
+        "hospital_id,department_id,language",
+    }
+  );
 
-        template: data,
+return res.json({
 
-      });
+  success: true,
 
+  template: data,
+
+});
     } catch (err) {
 
       console.log(
