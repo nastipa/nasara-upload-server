@@ -5737,86 +5737,69 @@ await supabaseAdmin
 
 const voices = [];
 
-
-// 1. Always add English TTS
-
-voices.push({
-
-  language: "en",
-
-  audio_type: "tts",
-
-  audio_url: null
-
-});
-
-
-
-// 2. Add all selected department languages
-
-for (
-  const item of departmentLanguages || []
-) {
-
-
-  // English already added
-  if(item.language === "en"){
-    continue;
-  }
-
-
+for (const item of departmentLanguages || []) {
 
   const {
     data: template
-  }
-  =
+  } =
   await supabaseAdmin
-  .from("hospital_voice_templates")
-  .select(`
-    audio_url,
-    language
-  `)
-  .eq(
-    "hospital_id",
-    booking.hospital_id
-  )
-  .eq(
-    "department_id",
-    booking.department_id
-  )
-  .eq(
-    "language",
-    item.language
-  )
-  .eq(
-    "active",
-    true
-  )
-  .maybeSingle();
+    .from("hospital_voice_templates")
+    .select(`
+      language,
+      audio_url
+    `)
+    .eq(
+      "hospital_id",
+      booking.hospital_id
+    )
+    .eq(
+      "department_id",
+      booking.department_id
+    )
+    .eq(
+      "language",
+      item.language
+    )
+    .eq(
+      "active",
+      true
+    )
+    .maybeSingle();
 
 
+  if (template?.audio_url) {
 
-  if(template?.audio_url){
-
-
+    // Use recorded voice
     voices.push({
 
       language:
-      template.language,
-
+        template.language,
 
       audio_type:
-      "template",
-
+        "template",
 
       audio_url:
-      template.audio_url
+        template.audio_url,
 
     });
 
+  } else {
+
+    // Fall back to TTS if no recording exists
+    voices.push({
+
+      language:
+        item.language,
+
+      audio_type:
+        "tts",
+
+      audio_url:
+        null,
+
+    });
 
   }
-
 
 }
 
@@ -7745,49 +7728,37 @@ await supabaseAdmin
 
 const voices = [];
 
-// Always announce the queue number first in English
-voices.push({
-
-  language: "en",
-
-  audio_type: "tts",
-
-  audio_url: null
-
-});
-
-// Add every enabled local language recording
 for (const item of departmentLanguages || []) {
 
-  if (item.language === "en") {
-    continue;
-  }
-
-  const {
-    data: template
-  } =
-  await supabaseAdmin
-  .from("hospital_voice_templates")
-  .select(`
-    language,
-    audio_url
-  `)
-  .eq("hospital_id", hospitalId)
-  .eq("department_id", departmentId)
-  .eq("language", item.language)
-  .eq("active", true)
-  .maybeSingle();
+  const { data: template } =
+    await supabaseAdmin
+      .from("hospital_voice_templates")
+      .select(`
+        language,
+        audio_url
+      `)
+      .eq("hospital_id", hospitalId)
+      .eq("department_id", departmentId)
+      .eq("language", item.language)
+      .eq("active", true)
+      .maybeSingle();
 
   if (template?.audio_url) {
 
+    // Play recorded voice
     voices.push({
-
       language: template.language,
-
       audio_type: "template",
+      audio_url: template.audio_url,
+    });
 
-      audio_url: template.audio_url
+  } else {
 
+    // Fall back to TTS only if no recording exists
+    voices.push({
+      language: item.language,
+      audio_type: "tts",
+      audio_url: null,
     });
 
   }
@@ -7812,13 +7783,11 @@ await supabaseAdmin
 
   queue_number: booking.queue_number,
 
-  message:
-   ` ${req.staff.department_name} Queue Number ${booking.queue_number}`,
+  message: `${req.staff.department_name} Queue Number ${booking.queue_number}`,
 
   voices,
 
-  priority:
-    booking.priority_level || 3,
+  priority: booking.priority_level || 3,
 
   played: false
 
