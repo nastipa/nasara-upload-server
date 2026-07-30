@@ -593,6 +593,142 @@ async function savePatientJourney({
   }
 }
 /* =========================================================
+   BUILD VOICE SEQUENCE
+========================================================= */
+async function buildVoiceSequence(
+  hospitalId,
+  departmentId
+){
+
+  const voices = [];
+
+
+  // ALWAYS ADD ENGLISH TTS FIRST
+
+  voices.push({
+
+    language:"en",
+
+    audio_type:"tts",
+
+    audio_url:null
+
+  });
+
+
+
+  const {
+    data: departmentLanguages
+  }
+  =
+  await supabaseAdmin
+  .from("hospital_department_languages")
+  .select(`
+    language,
+    display_order
+  `)
+  .eq(
+    "hospital_id",
+    hospitalId
+  )
+  .eq(
+    "department_id",
+    departmentId
+  )
+  .eq(
+    "enabled",
+    true
+  )
+  .order(
+    "display_order",
+    {
+      ascending:true
+    }
+  );
+
+
+
+  for(
+    const item of departmentLanguages || []
+  ){
+
+
+    const {
+      data: template
+    }
+    =
+    await supabaseAdmin
+    .from("hospital_voice_templates")
+    .select(`
+      language,
+      audio_url
+    `)
+    .eq(
+      "hospital_id",
+      hospitalId
+    )
+    .eq(
+      "department_id",
+      departmentId
+    )
+    .eq(
+      "language",
+      item.language
+    )
+    .eq(
+      "active",
+      true
+    )
+    .maybeSingle();
+
+
+
+    console.log(
+      "VOICE LANGUAGE:",
+      item.language,
+      "TEMPLATE:",
+      template
+    );
+
+
+
+    if(template?.audio_url){
+
+      voices.push({
+
+        language:template.language,
+
+        audio_type:"template",
+
+        audio_url:template.audio_url
+
+      });
+
+
+    } else {
+
+
+      voices.push({
+
+        language:item.language,
+
+        audio_type:"tts",
+
+        audio_url:null
+
+      });
+
+
+    }
+
+
+  }
+
+
+  return voices;
+
+}
+/* =========================================================
    GET ALL ACTIVE HOSPITALS
 ========================================================= */
 
@@ -5645,47 +5781,11 @@ if (status === "called") {
 
   // Queue voice announcement
 
-/* --------------------------------
-   GET ACTIVE LANGUAGE FOR DEPARTMENT
--------------------------------- */
 
-const { data: activeLanguage } =
-await supabaseAdmin
-.from("hospital_department_voice_settings")
-.select("language")
-.eq("hospital_id", booking.hospital_id)
-.eq("department_id", booking.department_id)
-.eq("enabled", true)
-.maybeSingle();
-
-/* --------------------------------
-   GET TEMPLATE FOR THAT LANGUAGE
--------------------------------- */
-
-const { data: template } =
-await supabaseAdmin
-.from("hospital_voice_templates")
-.select(`
-  audio_url,
-  language
-`)
-.eq("hospital_id", booking.hospital_id)
-.eq("department_id", booking.department_id)
-.eq(
-  "language",
-  activeLanguage?.language || "en"
-)
-.eq("active", true)
-.maybeSingle();
-
-/* --------------------------------
-   CREATE MULTI LANGUAGE VOICE QUEUE
--------------------------------- */
-
-// Get department name
 const {
   data: department
-} =
+}
+=
 await supabaseAdmin
 .from("hospital_departments")
 .select("name")
@@ -5702,106 +5802,17 @@ department?.name || "Department";
 
 
 
-// 1. Get department selected languages
+/*
+====================================
+BUILD VOICE SEQUENCE
+====================================
+*/
 
-const {
-  data: departmentLanguages
-}
-=
-await supabaseAdmin
-.from("hospital_department_languages")
-.select(`
-  language,
-  display_order
-`)
-.eq(
-  "hospital_id",
-  booking.hospital_id
-)
-.eq(
-  "department_id",
+const voices =
+await buildVoiceSequence(
+  booking.hospital_id,
   booking.department_id
-)
-.eq(
-  "enabled",
-  true
-)
-.order(
-  "display_order",
-  {
-    ascending:true
-  }
 );
-
-
-
-const voices = [];
-
-for (const item of departmentLanguages || []) {
-
-  const {
-    data: template
-  } =
-  await supabaseAdmin
-    .from("hospital_voice_templates")
-    .select(`
-      language,
-      audio_url
-    `)
-    .eq(
-      "hospital_id",
-      booking.hospital_id
-    )
-    .eq(
-      "department_id",
-      booking.department_id
-    )
-    .eq(
-      "language",
-      item.language
-    )
-    .eq(
-      "active",
-      true
-    )
-    .maybeSingle();
-
-
-  if (template?.audio_url) {
-
-    // Use recorded voice
-    voices.push({
-
-      language:
-        template.language,
-
-      audio_type:
-        "template",
-
-      audio_url:
-        template.audio_url,
-
-    });
-
-  } else {
-
-    // Fall back to TTS if no recording exists
-    voices.push({
-
-      language:
-        item.language,
-
-      audio_type:
-        "tts",
-
-      audio_url:
-        null,
-
-    });
-
-  }
-
-}
 
 // 3. Insert single voice queue with multiple languages
 
@@ -7705,95 +7716,22 @@ router.post(
         });
 
       }
-     /* --------------------------------
   /* --------------------------------
    CREATE MULTI-LANGUAGE VOICE LIST
 -------------------------------- */
 
-const {
-  data: departmentLanguages
-}
-=
-await supabaseAdmin
-.from("hospital_department_languages")
-.select(`
-  language,
-  display_order
-`)
-.eq(
-  "hospital_id",
-  booking.hospital_id
-)
-.eq(
-  "department_id",
-  booking.department_id
-)
-.eq(
-  "enabled",
-  true
-)
-.order(
-  "display_order",
-  {
-    ascending:true
-  }
+const voices =
+await buildVoiceSequence(
+  hospitalId,
+  departmentId
 );
 
-console.log(
-  "Department languages:",
-  departmentLanguages
-);
-
-const voices = [];
-
-for (const item of departmentLanguages || []) {
-
-  const { data: template } =
-    await supabaseAdmin
-      .from("hospital_voice_templates")
-      .select(`
-        language,
-        audio_url
-      `)
-      .eq("hospital_id", hospitalId)
-      .eq("department_id", departmentId)
-      .eq("language", item.language)
-      .eq("active", true)
-      .maybeSingle();
-
-console.log(
-  "Language:",
-  item.language,
-  "Template:",
-  template
-);
-
-  if (template?.audio_url) {
-
-    // Play recorded voice
-    voices.push({
-      language: template.language,
-      audio_type: "template",
-      audio_url: template.audio_url,
-    });
-
-  } else {
-
-    // Fall back to TTS only if no recording exists
-    voices.push({
-      language: item.language,
-      audio_type: "tts",
-      audio_url: null,
-    });
-
-  }
-
-}
 
 /* --------------------------------
    SAVE SINGLE VOICE ANNOUNCEMENT
 -------------------------------- */
 
+const { error: voiceError } =
 await supabaseAdmin
 .from("hospital_voice_queue")
 .insert({
@@ -7808,15 +7746,27 @@ await supabaseAdmin
 
   queue_number: booking.queue_number,
 
-  message: `${req.staff.department_name} Queue Number ${booking.queue_number}`,
+  message:
+    `${req.staff.department_name} Queue Number ${booking.queue_number}`,
 
   voices,
 
-  priority: booking.priority_level || 3,
+  priority:
+    booking.priority_level || 3,
 
-  played: false
+  played:false
 
 });
+
+
+if(voiceError){
+
+  console.log(
+    "VOICE QUEUE INSERT ERROR",
+    voiceError
+  );
+
+}
 
       /* --------------------------------
          CREATE PATIENT NOTIFICATION
