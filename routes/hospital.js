@@ -5644,8 +5644,22 @@ if (status === "called") {
     .eq("id", booking.department_id);
 
   // Queue voice announcement
-  /* --------------------------------
-   GET LOCAL LANGUAGE TEMPLATE
+
+/* --------------------------------
+   GET ACTIVE LANGUAGE FOR DEPARTMENT
+-------------------------------- */
+
+const { data: activeLanguage } =
+await supabaseAdmin
+.from("hospital_department_voice_settings")
+.select("language")
+.eq("hospital_id", booking.hospital_id)
+.eq("department_id", booking.department_id)
+.eq("enabled", true)
+.maybeSingle();
+
+/* --------------------------------
+   GET TEMPLATE FOR THAT LANGUAGE
 -------------------------------- */
 
 const { data: template } =
@@ -5657,6 +5671,10 @@ await supabaseAdmin
 `)
 .eq("hospital_id", booking.hospital_id)
 .eq("department_id", booking.department_id)
+.eq(
+  "language",
+  activeLanguage?.language || "en"
+)
 .eq("active", true)
 .maybeSingle();
 
@@ -5664,37 +5682,177 @@ await supabaseAdmin
    CREATE VOICE ANNOUNCEMENT
 -------------------------------- */
 
+/* --------------------------------
+   CREATE MULTI LANGUAGE VOICE QUEUE
+-------------------------------- */
+
+
+// 1. Get department selected languages
+
+const {
+  data: departmentLanguages
+} =
 await supabaseAdmin
-.from("hospital_voice_queue")
-.insert({
+.from("hospital_department_languages")
+.select(`
+  language,
+  display_order
+`)
+.eq(
+  "hospital_id",
+  booking.hospital_id
+)
+.eq(
+  "department_id",
+  booking.department_id
+)
+.eq(
+  "enabled",
+  true
+)
+.order(
+  "display_order",
+  {
+    ascending:true
+  }
+);
 
-  hospital_id: booking.hospital_id,
 
-  booking_id: booking.id,
 
-  department_id: booking.department_id,
+const voiceQueue = [];
 
-  patient_id: booking.patient_id,
 
-  queue_number: booking.queue_number,
+// 2. Always create English computer announcement first
 
-  message: `Queue ${booking.queue_number}, please proceed to your consultation room.`,
+voiceQueue.push({
+
+  hospital_id:
+    booking.hospital_id,
+
+  booking_id:
+    booking.id,
+
+  department_id:
+    booking.department_id,
+
+  patient_id:
+    booking.patient_id,
+
+  queue_number:
+    booking.queue_number,
 
   language:
-    template?.language || "en",
+    "en",
 
   audio_type:
-    template ? "template" : "tts",
+    "tts",
 
   audio_url:
-    template?.audio_url || null,
+    null,
+
+  message:
+    `${req.staff.department_name} Queue Number ${booking.queue_number}`,
 
   priority:
     booking.priority_level || 3,
 
-  played: false,
+  played:false,
 
 });
+
+
+
+// 3. Add local language recordings
+
+for(
+ const item of departmentLanguages || []
+){
+
+  if(item.language === "en"){
+    continue;
+  }
+
+
+  const {
+    data: template
+  } =
+  await supabaseAdmin
+  .from("hospital_voice_templates")
+  .select(`
+    audio_url,
+    language
+  `)
+  .eq(
+    "hospital_id",
+    booking.hospital_id
+  )
+  .eq(
+    "department_id",
+    booking.department_id
+  )
+  .eq(
+    "language",
+    item.language
+  )
+  .eq(
+    "active",
+    true
+  )
+  .maybeSingle();
+
+
+
+  if(template){
+
+    voiceQueue.push({
+
+      hospital_id:
+        booking.hospital_id,
+
+      booking_id:
+        booking.id,
+
+      department_id:
+        booking.department_id,
+
+      patient_id:
+        booking.patient_id,
+
+      queue_number:
+        booking.queue_number,
+
+      language:
+        template.language,
+
+      audio_type:
+        "template",
+
+      audio_url:
+        template.audio_url,
+
+      message:
+        "Please proceed to your consultation room.",
+
+      priority:
+        booking.priority_level || 3,
+
+      played:false,
+
+    });
+
+  }
+
+}
+
+
+
+// 4. Save all announcements
+
+await supabaseAdmin
+.from("hospital_voice_queue")
+.insert(
+  voiceQueue
+);
   notifyNextPatients(
     booking.hospital_id,
     booking.department_id,
@@ -9274,7 +9432,7 @@ router.get(
               ascending:true,
             }
           )
-          .limit(1);
+         
 
 
       if(error){
@@ -9292,13 +9450,12 @@ router.get(
 
       return res.json({
 
-        success:true,
+ success:true,
 
-        announcement:
-          data?.[0] || null,
+ announcements:
+   data || [],
 
-      });
-
+});
 
     }catch(err){
 
@@ -9468,7 +9625,7 @@ router.get(
 
 
 /* =========================================================
-   MARK VOICE ANNOUNCEMENT PLAYED
+   MARK COMPLETE VOICE SEQUENCE PLAYED
 ========================================================= */
 
 router.post(
@@ -9477,34 +9634,26 @@ router.post(
   departmentStaffAuth,
   async(req,res)=>{
 
-
     try{
-
 
       const {
         hospital_id,
         department_id
-      }
-      =
-      req.departmentStaff;
+      } = req.departmentStaff;
 
 
       const {
-        id
-      }
-      =
-      req.body;
+        booking_id
+      } = req.body;
 
 
-
-      if(!id){
+      if(!booking_id){
 
         return res.status(400).json({
 
           success:false,
 
-          error:
-          "Voice queue id required"
+          error:"booking_id required"
 
         });
 
@@ -9515,24 +9664,20 @@ router.post(
       const {
         data,
         error
-      }
-      =
+      } =
       await supabaseAdmin
-      .from(
-        "hospital_voice_queue"
-      )
+      .from("hospital_voice_queue")
       .update({
 
         played:true,
 
         played_at:
-        new Date()
-        .toISOString()
+          new Date().toISOString()
 
       })
       .eq(
-        "id",
-        id
+        "booking_id",
+        booking_id
       )
       .eq(
         "hospital_id",
@@ -9542,8 +9687,7 @@ router.post(
         "department_id",
         department_id
       )
-      .select()
-      .single();
+      .select();
 
 
 
@@ -9565,13 +9709,13 @@ router.post(
 
         success:true,
 
-        announcement:data
+        announcements:data
 
       });
 
 
-
-    }catch(err){
+    }
+    catch(err){
 
       return res.status(500).json({
 
@@ -9582,7 +9726,6 @@ router.post(
       });
 
     }
-
 
   }
 );
