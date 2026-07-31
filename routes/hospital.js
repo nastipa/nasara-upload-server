@@ -5432,20 +5432,73 @@ router.post(
   }
 );
 /* =========================================================
-   GET HOSPITAL DEPARTMENTS FOR STAFF
+   GET HOSPITAL DEPARTMENTS
+   (Hospital Admin + Department Staff)
 ========================================================= */
 
 router.get(
   "/departments",
   authenticate,
-  hospitalDepartmentStaffAuth,
   async (req, res) => {
 
     try {
 
-      const hospitalId =
-        req.staff.hospital_id;
+      let hospitalId = null;
 
+      /* ------------------------------
+         Hospital Admin
+      ------------------------------ */
+
+      try {
+        await new Promise((resolve, reject) => {
+          hospitalAdminAuth(req, res, (err) => {
+            if (err) return reject(err);
+
+            if (req.hospitalAdmin?.hospital_id) {
+              hospitalId =
+                req.hospitalAdmin.hospital_id;
+            }
+
+            resolve();
+          });
+        });
+      } catch (_) {}
+
+      /* ------------------------------
+         Department Staff
+      ------------------------------ */
+
+      if (!hospitalId) {
+
+        try {
+          await new Promise((resolve, reject) => {
+            hospitalDepartmentStaffAuth(
+              req,
+              res,
+              (err) => {
+                if (err) return reject(err);
+
+                if (req.staff?.hospital_id) {
+                  hospitalId =
+                    req.staff.hospital_id;
+                }
+
+                resolve();
+              }
+            );
+          });
+        } catch (_) {}
+
+      }
+
+      if (!hospitalId) {
+
+        return res.status(403).json({
+          success: false,
+          error: "Hospital access denied",
+        });
+
+      }
 
       const { data, error } =
         await supabaseAdmin
@@ -5455,22 +5508,21 @@ router.get(
           .eq("is_active", true)
           .order("name");
 
-
       if (error) {
+
         return res.status(400).json({
-          success:false,
-          error:error.message
+          success: false,
+          error: error.message,
         });
+
       }
 
-
       return res.json({
-        success:true,
-        departments:data || []
+        success: true,
+        departments: data || [],
       });
 
-
-    } catch(err) {
+    } catch (err) {
 
       console.log(
         "Get departments error:",
@@ -5478,8 +5530,8 @@ router.get(
       );
 
       return res.status(500).json({
-        success:false,
-        error:err.message
+        success: false,
+        error: err.message,
       });
 
     }
