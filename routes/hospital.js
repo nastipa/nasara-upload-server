@@ -5781,53 +5781,6 @@ if (status === "transferred") {
 
 }
 
-/* =====================================
-   CREATE HOSPITAL REFERRAL
-===================================== */
-
-if (status === "referred") {
-
-  if (!booking.referral_hospital_id) {
-
-    return res.status(400).json({
-      success: false,
-      error:
-        "Referral hospital has not been selected.",
-    });
-
-  }
-
-  await supabaseAdmin
-    .from("hospital_referrals")
-    .insert({
-
-      booking_id: booking.id,
-
-      patient_id: booking.patient_id,
-
-      patient_record_id:
-        booking.patient_record_id,
-
-      from_hospital_id:
-        booking.hospital_id,
-
-      from_department_id:
-        booking.department_id,
-
-      to_hospital_id:
-        booking.referral_hospital_id,
-
-      referred_by:
-        req.user.id,
-
-      referred_at:
-        new Date().toISOString(),
-
-      status: "pending",
-
-    });
-
-}
 
     if (error) {
       return res.status(400).json({
@@ -8619,7 +8572,58 @@ router.post(
         });
 
       }
+      /* =====================================
+   CREATE HOSPITAL REFERRAL
+===================================== */
 
+const { error: referralError } =
+await supabaseAdmin
+.from("hospital_referrals")
+.insert({
+
+  booking_id:
+    booking.id,
+
+  patient_id:
+    booking.patient_id,
+
+  patient_record_id:
+    booking.patient_record_id,
+
+  from_hospital_id:
+    booking.hospital_id,
+
+  from_department_id:
+    booking.department_id,
+
+  to_hospital_id:
+    referral_hospital,
+
+  to_department_id:
+    referral_department || null,
+
+  reason,
+
+  referred_by:
+    req.user.id,
+
+  referred_at:
+    new Date().toISOString(),
+
+  status:
+    "pending",
+
+});
+
+
+if (referralError) {
+
+  return res.status(400).json({
+    success:false,
+    error: referralError.message,
+  });
+
+}
       await supabaseAdmin
       .from("hospital_patient_journey")
       .insert({
@@ -8703,7 +8707,7 @@ router.post(
   }
 );
 /* =========================================================
-   GET HOSPITAL REFERRALS
+   GET HOSPITAL REFERRALS (INBOX)
 ========================================================= */
 
 router.get(
@@ -8718,73 +8722,106 @@ router.get(
           .from("hospital_department_staff")
           .select(`
             hospital_id,
-            department_id,
-            role
+            department_id
           `)
-          .eq("user_id", req.user.id)
-          .eq("active", true)
+          .eq(
+            "user_id",
+            req.user.id
+          )
+          .eq(
+            "active",
+            true
+          )
           .maybeSingle();
+
 
       if (!staff) {
 
         return res.status(403).json({
-          success: false,
-          error: "Staff account not found.",
+          success:false,
+          error:"Staff account not found.",
         });
 
       }
 
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_referrals")
-          .select(`
-            *,
-            patient_records(
-              id,
-              full_name,
-              gender,
-              phone
-            ),
-            hospitals!hospital_referrals_from_hospital_id_fkey(
-              id,
-              name
-            )
-          `)
-          .eq(
-            "to_hospital_id",
-            staff.hospital_id
+
+      const {
+        data: referrals,
+        error
+      } =
+      await supabaseAdmin
+        .from("hospital_referrals")
+        .select(`
+          id,
+          booking_id,
+          patient_record_id,
+          from_hospital_id,
+          from_department_id,
+          to_hospital_id,
+          to_department_id,
+          reason,
+          status,
+          referred_at,
+
+          patient_records(
+            id,
+            full_name,
+            gender,
+            phone
+          ),
+
+          hospitals!hospital_referrals_from_hospital_id_fkey(
+            id,
+            name
           )
-          .order(
-            "referred_at",
-            {
-              ascending: false,
-            }
-          );
+        `)
+        .eq(
+          "to_hospital_id",
+          staff.hospital_id
+        )
+        .eq(
+          "status",
+          "pending"
+        )
+        .order(
+          "referred_at",
+          {
+            ascending:false,
+          }
+        );
+
 
       if (error) {
 
         return res.status(400).json({
-          success: false,
-          error: error.message,
+          success:false,
+          error:error.message,
         });
 
       }
 
+
       return res.json({
 
-        success: true,
+        success:true,
 
-        referrals: data || [],
+        referrals:
+          referrals || [],
 
       });
 
-    } catch (err) {
+
+    } catch(err) {
 
       console.log(err);
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:
+          err.message,
+
       });
 
     }
@@ -8802,189 +8839,284 @@ router.post(
 
     try {
 
-      const { referral_id } = req.body;
+      const {
+        referral_id,
+        department_id,
+      } = req.body;
 
-      if (!referral_id) {
+
+      if (!referral_id || !department_id) {
+
         return res.status(400).json({
-          success: false,
-          error: "referral_id is required",
+          success:false,
+          error:
+          "referral_id and department_id are required",
         });
+
       }
 
-      const { data: staff } =
-        await supabaseAdmin
-          .from("hospital_department_staff")
-          .select(`
-            hospital_id,
-            department_id
-          `)
-          .eq("user_id", req.user.id)
-          .eq("active", true)
-          .maybeSingle();
+
+      const {
+        data: staff
+      } =
+      await supabaseAdmin
+      .from("hospital_department_staff")
+      .select(`
+        hospital_id
+      `)
+      .eq(
+        "user_id",
+        req.user.id
+      )
+      .eq(
+        "active",
+        true
+      )
+      .maybeSingle();
+
 
       if (!staff) {
+
         return res.status(403).json({
-          success: false,
-          error: "Staff account not found.",
+          success:false,
+          error:
+          "Staff account not found",
         });
+
       }
+
+
 
       const {
         data: referral,
-        error: referralError,
-      } =
+        error: referralError
+      }
+      =
       await supabaseAdmin
-        .from("hospital_referrals")
-        .select("*")
-        .eq("id", referral_id)
-        .eq("to_hospital_id", staff.hospital_id)
-        .maybeSingle();
+      .from("hospital_referrals")
+      .select("*")
+      .eq(
+        "id",
+        referral_id
+      )
+      .eq(
+        "to_hospital_id",
+        staff.hospital_id
+      )
+      .eq(
+        "status",
+        "pending"
+      )
+      .maybeSingle();
+
+
 
       if (referralError) {
+
         return res.status(400).json({
-          success: false,
-          error: referralError.message,
+          success:false,
+          error:
+          referralError.message,
         });
+
       }
+
+
 
       if (!referral) {
+
         return res.status(404).json({
-          success: false,
-          error: "Referral not found.",
+          success:false,
+          error:
+          "Referral not found",
         });
+
       }
 
-      if (referral.status === "accepted") {
-        return res.status(400).json({
-          success: false,
-          error: "Referral already accepted.",
-        });
-      }
+
 
       const today =
-        new Date()
-          .toISOString()
-          .split("T")[0];
+      new Date()
+      .toISOString()
+      .split("T")[0];
+
+
 
       const {
         count
-      } =
+      }
+      =
       await supabaseAdmin
-        .from("hospital_bookings")
-        .select("*", {
-          count: "exact",
-          head: true,
-        })
-        .eq("hospital_id", staff.hospital_id)
-        .eq("department_id", staff.department_id)
-        .eq("booking_date", today);
+      .from("hospital_bookings")
+      .select(
+        "id",
+        {
+          count:"exact",
+          head:true
+        }
+      )
+      .eq(
+        "hospital_id",
+        staff.hospital_id
+      )
+      .eq(
+        "department_id",
+        department_id
+      )
+      .eq(
+        "booking_date",
+        today
+      );
+
+
 
       const queuePosition =
-        (count || 0) + 1;
+      (count || 0) + 1;
+
+
 
       const queueNumber =
-        queuePosition
-          .toString()
-          .padStart(3, "0");
+      queuePosition
+      .toString()
+      .padStart(3,"0");
+
+
 
       const {
         data: booking,
-        error: bookingError,
-      } =
+        error: bookingError
+      }
+      =
       await supabaseAdmin
-        .from("hospital_bookings")
-        .insert({
+      .from("hospital_bookings")
+      .insert({
 
-          hospital_id:
-            staff.hospital_id,
+        hospital_id:
+        staff.hospital_id,
 
-          department_id:
-            staff.department_id,
+        department_id,
 
-          patient_record_id:
-            referral.patient_record_id,
+        patient_record_id:
+        referral.patient_record_id,
 
-          booking_date:
-            today,
 
-          queue_number:
-            queueNumber,
+        booking_date:
+        today,
 
-          queue_position:
-            queuePosition,
 
-          priority:
-            "referral",
+        queue_number:
+        queueNumber,
 
-          priority_level: 2,
 
-          status:
-            "waiting",
+        queue_position:
+        queuePosition,
 
-          condition:
-            referral.reason,
 
-          referral_hospital:
-            referral.from_hospital_id,
+        priority:
+        "referral",
 
-        })
-        .select()
-        .single();
+
+        priority_level:
+        2,
+
+
+        status:
+        "waiting",
+
+
+        condition:
+        "Referral Patient",
+
+
+      })
+      .select()
+      .single();
+
+
 
       if (bookingError) {
+
         return res.status(400).json({
-          success: false,
-          error: bookingError.message,
+          success:false,
+          error:
+          bookingError.message,
         });
+
       }
 
+
+
+
       await supabaseAdmin
-        .from("hospital_referrals")
-        .update({
+      .from("hospital_referrals")
+      .update({
 
-          status: "accepted",
+        status:
+        "accepted",
 
-          accepted_at:
-            new Date().toISOString(),
+        accepted_at:
+        new Date().toISOString(),
 
-          booking_id:
-            booking.id,
+        booking_id:
+        booking.id,
 
-        })
-        .eq("id", referral.id);
+      })
+      .eq(
+        "id",
+        referral_id
+      );
+
+
+
+
 
       await savePatientJourney({
 
-        booking_id: booking.id,
+        booking_id:
+        booking.id,
 
-        hospital_id: booking.hospital_id,
+        hospital_id:
+        booking.hospital_id,
 
-        department_id: booking.department_id,
+        department_id:
+        booking.department_id,
 
-        action: "Referral Accepted",
+        action:
+        "Referral Accepted",
 
         notes:
-          "Receiving hospital accepted referral.",
+        "Patient added to receiving hospital queue.",
 
-        performed_by: req.user.id,
+        performed_by:
+        req.user.id,
 
       });
 
+
+
+
+
       return res.json({
 
-        success: true,
+        success:true,
 
         booking,
 
       });
 
-    } catch (err) {
+
+
+    } catch(err) {
 
       console.log(err);
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:
+        err.message,
+
       });
 
     }
@@ -9007,107 +9139,263 @@ router.post(
         reason,
       } = req.body;
 
+
       if (!referral_id) {
+
         return res.status(400).json({
           success: false,
           error: "referral_id is required",
         });
+
       }
 
-      const { data: staff } =
-        await supabaseAdmin
-          .from("hospital_department_staff")
-          .select("hospital_id")
-          .eq("user_id", req.user.id)
-          .eq("active", true)
-          .maybeSingle();
+
+      /*
+        FIND RECEIVING HOSPITAL STAFF
+      */
+
+      const {
+        data: staff,
+        error: staffError,
+      } =
+      await supabaseAdmin
+        .from("hospital_department_staff")
+        .select(`
+          hospital_id,
+          department_id
+        `)
+        .eq(
+          "user_id",
+          req.user.id
+        )
+        .eq(
+          "active",
+          true
+        )
+        .maybeSingle();
+
+
+      if (staffError) {
+
+        return res.status(400).json({
+          success:false,
+          error:staffError.message,
+        });
+
+      }
+
 
       if (!staff) {
+
         return res.status(403).json({
-          success: false,
-          error: "Staff account not found.",
+          success:false,
+          error:
+          "Staff account not found.",
         });
+
       }
+
+
+      /*
+        FIND REFERRAL
+      */
 
       const {
         data: referral,
-        error,
+        error: referralError,
       } =
       await supabaseAdmin
         .from("hospital_referrals")
         .select("*")
-        .eq("id", referral_id)
-        .eq("to_hospital_id", staff.hospital_id)
+        .eq(
+          "id",
+          referral_id
+        )
+        .eq(
+          "to_hospital_id",
+          staff.hospital_id
+        )
         .maybeSingle();
 
-      if (error) {
+
+      if (referralError) {
+
         return res.status(400).json({
-          success: false,
-          error: error.message,
+          success:false,
+          error:referralError.message,
         });
+
       }
+
 
       if (!referral) {
+
         return res.status(404).json({
-          success: false,
-          error: "Referral not found.",
+          success:false,
+          error:
+          "Referral not found.",
         });
+
       }
 
+
+      if (
+        referral.status === "rejected"
+      ) {
+
+        return res.status(400).json({
+          success:false,
+          error:
+          "Referral already rejected.",
+        });
+
+      }
+
+
+
+      /*
+        UPDATE REFERRAL STATUS
+      */
+
+      const {
+        data: updatedReferral,
+        error:updateError
+      } =
       await supabaseAdmin
         .from("hospital_referrals")
         .update({
 
-          status: "rejected",
+          status:
+          "rejected",
 
           rejected_at:
-            new Date().toISOString(),
+          new Date().toISOString(),
 
           rejection_reason:
-            reason || "No reason provided",
+          reason ||
+          "No reason provided",
 
         })
-        .eq("id", referral.id);
+        .eq(
+          "id",
+          referral.id
+        )
+        .select()
+        .single();
+
+
+
+      if (updateError) {
+
+        return res.status(400).json({
+          success:false,
+          error:updateError.message,
+        });
+
+      }
+
+
+
+      /*
+        SAVE PATIENT JOURNEY
+      */
 
       await savePatientJourney({
 
         booking_id:
-          referral.booking_id,
+        referral.booking_id,
 
         hospital_id:
-          referral.from_hospital_id,
+        referral.from_hospital_id,
 
         department_id:
-          referral.from_department_id,
+        referral.from_department_id,
+
+        patient_id:
+        referral.patient_id,
+
+        patient_record_id:
+        referral.patient_record_id,
 
         action:
-          "Referral Rejected",
+        "Referral Rejected",
 
         notes:
-          reason ||
-          "Receiving hospital rejected referral.",
+        reason ||
+        "Receiving hospital rejected referral.",
 
         performed_by:
-          req.user.id,
+        req.user.id,
 
       });
+
+
+
+      /*
+        NOTIFY ORIGINAL HOSPITAL/PATIENT
+      */
+
+      if (referral.patient_id) {
+
+        await supabaseAdmin
+          .from("hospital_notifications")
+          .insert({
+
+            hospital_id:
+            referral.from_hospital_id,
+
+            patient_id:
+            referral.patient_id,
+
+            booking_id:
+            referral.booking_id,
+
+            title:
+            "Referral Rejected",
+
+            message:
+            "Your referral request was rejected by the receiving hospital.",
+
+            type:
+            "referral",
+
+            read:false,
+
+          });
+
+      }
+
+
 
       return res.json({
 
-        success: true,
+        success:true,
 
         message:
-          "Referral rejected successfully.",
+        "Referral rejected successfully.",
+
+        referral:
+        updatedReferral,
 
       });
 
-    } catch (err) {
 
-      console.log(err);
+
+    } catch(err) {
+
+      console.log(
+        "Reject referral error:",
+        err
+      );
+
 
       return res.status(500).json({
-        success: false,
-        error: err.message,
+
+        success:false,
+
+        error:
+        err.message,
+
       });
 
     }
