@@ -9456,43 +9456,43 @@ router.get(
          LOAD REFERRALS SENT
       ---------------------------------- */
 
-      const {
-        data,
-        error,
-      } =
-      await supabaseAdmin
-        .from("hospital_referrals")
-        .select(`
-          *,
-          booking:hospital_bookings(
-            id,
-            queue_number
-          ),
-          patient_records(
-            id,
-            full_name,
-            gender,
-            phone
-          ),
-          from_hospital:hospitals!hospital_referrals_from_hospital_id_fkey(
-            id,
-            name
-          ),
-          to_hospital:hospitals!hospital_referrals_to_hospital_id_fkey(
-            id,
-            name
-          )
-        `)
-        .eq(
-          "from_hospital_id",
-          staff.hospital_id
-        )
-        .order(
-          "referred_at",
-          {
-            ascending: false,
-          }
-        );
+     const {
+  data,
+  error,
+} =
+await supabaseAdmin
+  .from("hospital_referrals")
+  .select(`
+    *,
+    booking:hospital_bookings!hospital_referrals_booking_id_fkey(
+      id,
+      queue_number
+    ),
+    patient_records(
+      id,
+      full_name,
+      gender,
+      phone
+    ),
+    from_hospital:hospitals!hospital_referrals_from_hospital_id_fkey(
+      id,
+      name
+    ),
+    to_hospital:hospitals!hospital_referrals_to_hospital_id_fkey(
+      id,
+      name
+    )
+  `)
+  .eq(
+    "from_hospital_id",
+    staff.hospital_id
+  )
+  .order(
+    "referred_at",
+    {
+      ascending:false,
+    }
+  );
 
       if (error) {
 
