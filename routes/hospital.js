@@ -9890,40 +9890,92 @@ try{
 
 const patientId = req.user.id;
 
-const { data, error } = await supabaseAdmin
-  .from("hospital_notifications")
-  .select(`
-    *,
-    hospital_bookings(
-      queue_number
-    )
-  `)
-  .eq("patient_id", patientId)
-  .order("created_at", {
-    ascending: false,
-  })
-  .limit(50);
+
+const {
+ data,
+ error
+} =
+await supabaseAdmin
+.from("hospital_notifications")
+.select(`
+  id,
+  title,
+  message,
+  type,
+  read,
+  created_at,
+
+  hospital_bookings(
+    id,
+    queue_number,
+    status
+  )
+`)
+.eq(
+  "patient_id",
+  patientId
+)
+.order(
+  "created_at",
+  {
+    ascending:false,
+  }
+)
+.limit(50);
+
+
 
 if(error){
 
 return res.status(400).json({
+
 success:false,
+
 error:error.message
+
 });
 
 }
+
+
+
+const notifications =
+(data || []).map(item=>({
+
+id:item.id,
+
+title:item.title,
+
+message:item.message,
+
+type:item.type,
+
+is_read:item.read,
+
+created_at:item.created_at,
+
+booking:item.hospital_bookings
+
+}));
+
 
 
 return res.json({
 
 success:true,
 
-notifications:data || []
+notifications
 
 });
 
 
 }catch(err){
+
+console.log(
+"PATIENT NOTIFICATION ERROR:",
+err
+);
+
 
 return res.status(500).json({
 
