@@ -594,6 +594,7 @@ async function savePatientJourney({
 }
 /* =========================================================
    BUILD HOSPITAL VOICE SEQUENCE
+   Hospital-wide voice recordings
 ========================================================= */
 
 async function buildVoiceSequence(
@@ -602,8 +603,10 @@ async function buildVoiceSequence(
 
   const voices = [];
 
+
   const {
-    data: languages
+    data: languages,
+    error: languageError
   } =
   await supabaseAdmin
   .from("hospital_announcement_languages")
@@ -626,13 +629,30 @@ async function buildVoiceSequence(
     }
   );
 
+
+  if(languageError){
+
+    console.log(
+      "Language load error:",
+      languageError
+    );
+
+  }
+
+
+
   for(const language of languages || []){
 
+
     const {
-      data: recording
-    } =
+      data: recording,
+      error: recordingError
+    }
+    =
     await supabaseAdmin
-    .from("hospital_voice_recordings")
+    .from(
+      "hospital_voice_recordings"
+    )
     .select(`
       audio_url
     `)
@@ -650,40 +670,69 @@ async function buildVoiceSequence(
     )
     .maybeSingle();
 
+
+
+    if(recordingError){
+
+      console.log(
+        "Voice recording error:",
+        recordingError
+      );
+
+    }
+
+
+
     if(recording?.audio_url){
 
+
       voices.push({
 
         language:
-          language.language_code,
+        language.language_code,
+
 
         audio_type:
-          "recording",
+        "recording",
+
 
         audio_url:
-          recording.audio_url
+        recording.audio_url
 
       });
 
-    }else{
+
+
+    }
+    else{
+
 
       voices.push({
 
         language:
-          language.language_code,
+        language.language_code,
+
 
         audio_type:
-          "tts",
+        "tts",
 
-        audio_url:null
+
+        audio_url:
+        null
 
       });
+
 
     }
 
   }
 
-  if(voices.length === 0){
+
+
+  // Always fallback
+  if(
+    voices.length === 0
+  ){
 
     voices.push({
 
@@ -696,6 +745,7 @@ async function buildVoiceSequence(
     });
 
   }
+
 
   return voices;
 
@@ -11294,75 +11344,368 @@ router.get(
 );
 
 /* =========================================================
-   SAVE OR UPDATE HOSPITAL VOICE
+   UPLOAD / UPDATE VOICE TEMPLATE
+   Hospital Admin Only
 ========================================================= */
 
 router.post(
-  "/hospital-voice",
+  "/upload-voice-template",
   authenticate,
   hospitalAdminAuth,
-  async(req,res)=>{
+  async (req, res) => {
 
-    try{
+    try {
 
-      const hospitalId =
+      const hospital_id =
         req.hospitalAdmin.hospital_id;
 
+
       const {
-        language = "en",
-        audio_url
+        department_id,
+        language,
+        template_type = "queue_call",
+        audio_url,
       } = req.body;
 
-      if(!audio_url){
+
+
+      if (
+        !department_id ||
+        !language ||
+        !audio_url
+      ) {
 
         return res.status(400).json({
+
           success:false,
-          error:"audio_url is required"
+
+          error:
+          "department_id, language and audio_url are required"
+
         });
 
       }
 
-      const { data, error } =
+
+
+      // Verify department belongs to hospital
+
+      const {
+        data: department,
+        error: deptError
+      } =
       await supabaseAdmin
-      .from("hospital_voice_settings")
+      .from("hospital_departments")
+      .select("id")
+      .eq("id", department_id)
+      .eq("hospital_id", hospital_id)
+      .maybeSingle();
+
+
+
+      if(deptError){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:deptError.message
+
+        });
+
+      }
+
+
+
+      if(!department){
+
+        return res.status(404).json({
+
+          success:false,
+
+          error:
+          "Department not found"
+
+        });
+
+      }
+
+
+
+      const {
+        data,
+        error
+      }
+      =
+      await supabaseAdmin
+      .from("hospital_voice_templates")
       .upsert(
+
         {
-          hospital_id:hospitalId,
+
+          hospital_id,
+
+          department_id,
+
           language,
+
+          template_type,
+
           audio_url,
+
+          active:true,
+
           created_by:req.user.id,
-          updated_at:new Date().toISOString()
+
+          updated_at:
+          new Date().toISOString()
+
         },
+
         {
-          onConflict:"hospital_id"
+
+          onConflict:
+          "hospital_id,department_id,language,template_type"
+
         }
+
       )
       .select()
       .single();
 
+
+
       if(error){
 
         return res.status(400).json({
+
           success:false,
+
           error:error.message
+
         });
 
       }
 
+
+
       return res.json({
+
         success:true,
-        voice:data
+
+        template:data
+
       });
 
+
+
     }
-    catch(err){
+    catch(error){
+
+      console.log(
+        "UPLOAD VOICE TEMPLATE ERROR",
+        error
+      );
+
 
       return res.status(500).json({
+
         success:false,
-        error:err.message
+
+        error:error.message
+
       });
 
     }
+
+  }
+);
+
+
+
+/* =========================================================
+   GET HOSPITAL VOICE TEMPLATES
+   Hospital Admin
+========================================================= */
+
+router.get(
+  "/voice-templates",
+  authenticate,
+  hospitalAdminAuth,
+  async(req,res)=>{
+
+
+    try{
+
+
+      const hospital_id =
+      req.hospitalAdmin.hospital_id;
+
+
+
+      const {
+        data,
+        error
+      }
+      =
+      await supabaseAdmin
+      .from("hospital_voice_templates")
+      .select(`
+        id,
+        department_id,
+        language,
+        template_type,
+        audio_url,
+        active,
+        created_at,
+        updated_at,
+        hospital_departments(
+          name
+        )
+      `)
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .order(
+        "created_at",
+        {
+          ascending:false
+        }
+      );
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        templates:data || []
+
+      });
+
+
+
+    }
+    catch(error){
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:error.message
+
+      });
+
+
+    }
+
+
+  }
+);
+
+
+
+
+/* =========================================================
+   DELETE VOICE TEMPLATE
+   Hospital Admin
+========================================================= */
+
+
+router.delete(
+  "/delete-voice-template/:id",
+  authenticate,
+  hospitalAdminAuth,
+  async(req,res)=>{
+
+
+    try{
+
+
+      const hospital_id =
+      req.hospitalAdmin.hospital_id;
+
+
+      const {
+        id
+      } = req.params;
+
+
+
+      const {
+        data,
+        error
+      }
+      =
+      await supabaseAdmin
+      .from("hospital_voice_templates")
+      .delete()
+      .eq(
+        "id",
+        id
+      )
+      .eq(
+        "hospital_id",
+        hospital_id
+      )
+      .select()
+      .single();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        deleted:data
+
+      });
+
+
+
+    }
+    catch(error){
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:error.message
+
+      });
+
+    }
+
 
   }
 );
