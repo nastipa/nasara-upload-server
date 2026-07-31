@@ -2861,27 +2861,41 @@ if (
 
 }
       const waiting =
-        bookings.filter(
-          b =>
-            b.status ===
-            "waiting"
-        ).length;
+  bookings.filter(
+    b => b.status === "waiting"
+  ).length;
 
-      const called =
-        bookings.filter(
-          b =>
-            b.status ===
-            "called"
-        ).length;
+const called =
+  bookings.filter(
+    b => b.status === "called"
+  ).length;
 
-      const checkedIn =
-        bookings.filter(
-          b =>
-            b.status ===
-            "checked_in"
-        ).length;
+const consultation =
+  bookings.filter(
+    b => b.status === "consultation"
+  ).length;
 
-      const completed =
+const admitted =
+  bookings.filter(
+    b => b.status === "admitted"
+  ).length;
+
+const discharged =
+  bookings.filter(
+    b => b.status === "discharged"
+  ).length;
+
+const transferred =
+  bookings.filter(
+    b => b.status === "transferred"
+  ).length;
+
+const referred =
+  bookings.filter(
+    b => b.status === "referred"
+  ).length;
+
+const completed =
   bookings.filter(
     b =>
       b.status === "completed" &&
@@ -2889,20 +2903,15 @@ if (
       b.completed_at.startsWith(today)
   ).length;
 
-      const cancelled =
-        bookings.filter(
-          b =>
-            b.status ===
-            "cancelled"
-        ).length;
+const cancelled =
+  bookings.filter(
+    b => b.status === "cancelled"
+  ).length;
 
-      const noShow =
-        bookings.filter(
-          b =>
-            b.status ===
-            "no_show"
-        ).length;
-
+const noShow =
+  bookings.filter(
+    b => b.status === "no_show"
+  ).length;
       const emergency =
         bookings.filter(
           b =>
@@ -2920,56 +2929,24 @@ if (
       const totalPatients =
         bookings.length;
 
-      /* ------------------------------
-         ADMISSIONS
-      ------------------------------ */
+     const admittedToday =
+  bookings.filter(
+    b =>
+      b.admitted_at &&
+      b.admitted_at.startsWith(today)
+  ).length;
 
-     const {
-  data: admissions,
-  error: admissionError,
-} = await supabaseAdmin
-  .from("hospital_admissions")
-  .select(`
-    admitted_at,
-    discharged_at,
-    status
-  `)
-  .eq("hospital_id", hospitalId)
-  .or(
-    `admitted_at.gte.${today}T00:00:00,admitted_at.lte.${today}T23:59:59,discharged_at.gte.${today}T00:00:00,discharged_at.lte.${today}T23:59:59`
-  );
-      if (admissionError) {
-        return res.status(400).json({
-          success: false,
-          error:
-            admissionError.message,
-        });
-      }
+const dischargedToday =
+  bookings.filter(
+    b =>
+      b.discharged_at &&
+      b.discharged_at.startsWith(today)
+  ).length;
 
-      const admittedToday =
-       (admissions || []).filter(
-          a =>
-            a.admitted_at &&
-            a.admitted_at.startsWith(
-              today
-            )
-        ).length;
-
-      const dischargedToday =
-       (admissions || []).filter(
-          a =>
-            a.discharged_at &&
-            a.discharged_at.startsWith(
-              today
-            )
-        ).length;
-
-      const currentlyAdmitted =
-        (admissions || []).filter(
-          a =>
-            a.status ===
-            "admitted"
-        ).length;
+const currentlyAdmitted =
+  bookings.filter(
+    b => b.status === "admitted"
+  ).length;
        /* ------------------------------
    GENDER & AGE
 ------------------------------ */
@@ -3101,10 +3078,10 @@ let consultationCount = 0;
 bookings.forEach((booking) => {
 
   if (
-    booking.arrived_at &&
-    booking.completed_at &&
-    booking.completed_at.startsWith(today)
-  ) {
+  booking.consultation_started_at &&
+  booking.completed_at &&
+  booking.completed_at.startsWith(today)
+) {
 
     const minutes =
       (
@@ -3112,8 +3089,8 @@ bookings.forEach((booking) => {
           booking.completed_at
         ) -
         new Date(
-          booking.arrived_at
-        )
+  booking.consultation_started_at
+)
       ) /
       60000;
 
@@ -3177,7 +3154,11 @@ bookings.forEach((booking) => {
       patients: 0,
       waiting: 0,
       called: 0,
-      checked_in: 0,
+      consultation: 0,
+admitted: 0,
+discharged: 0,
+transferred: 0,
+referred: 0,
       completed: 0,
     };
 
@@ -3210,14 +3191,25 @@ bookings.forEach((booking) => {
       .checked_in++;
   }
 
-  if (
-    booking.status ===
-    "completed"
-  ) {
-    departmentMap[id]
-      .completed++;
-  }
+  if (booking.status === "consultation") {
+  departmentMap[id].consultation++;
+}
 
+if (booking.status === "admitted") {
+  departmentMap[id].admitted++;
+}
+
+if (booking.status === "discharged") {
+  departmentMap[id].discharged++;
+}
+
+if (booking.status === "transferred") {
+  departmentMap[id].transferred++;
+}
+
+if (booking.status === "referred") {
+  departmentMap[id].referred++;
+}
 });
 
 const departments =
@@ -3338,8 +3330,15 @@ return res.json({
 
   called,
 
-  checked_in:
-    checkedIn,
+  consultation,
+
+admitted,
+
+discharged,
+
+transferred,
+
+referred,
 
   completed,
 
@@ -9887,51 +9886,58 @@ router.get(
       ---------------------------------- */
 
       const waiting =
-        bookings.filter(
-          p => p.status === "waiting"
-        ).length;
+  bookings.filter(
+    p => p.status === "waiting"
+  ).length;
 
-      const called =
-        bookings.filter(
-          p => p.status === "called"
-        ).length;
+const called =
+  bookings.filter(
+    p => p.status === "called"
+  ).length;
 
-      const checkedIn =
-        bookings.filter(
-          p => p.status === "checked_in"
-        ).length;
+const consultation =
+  bookings.filter(
+    p => p.status === "consultation"
+  ).length;
 
-      const completed =
-        bookings.filter(
-          p => p.status === "completed"
-        ).length;
+const admitted =
+  bookings.filter(
+    p => p.status === "admitted"
+  ).length;
 
-      const cancelled =
-        bookings.filter(
-          p => p.status === "cancelled"
-        ).length;
+const discharged =
+  bookings.filter(
+    p => p.status === "discharged"
+  ).length;
 
-      const emergency =
-        bookings.filter(
-          p => p.priority === "emergency"
-        ).length;
+const transferred =
+  bookings.filter(
+    p => p.status === "transferred"
+  ).length;
 
-      const urgent =
-        bookings.filter(
-          p => p.priority === "urgent"
-        ).length;
+const referred =
+  bookings.filter(
+    p => p.status === "referred"
+  ).length;
 
+const completed =
+  bookings.filter(
+    p => p.status === "completed"
+  ).length;
       /* ----------------------------------
          CURRENT PATIENT
       ---------------------------------- */
 
       const currentPatient =
-        bookings.find(
-          p =>
-            p.status === "called" ||
-            p.status === "checked_in"
-        ) || null;
-
+  bookings.find(
+    p =>
+      p.status === "consultation"
+  ) ||
+  bookings.find(
+    p =>
+      p.status === "called"
+  ) ||
+  null;
       /* ----------------------------------
          NEXT PATIENTS
       ---------------------------------- */
@@ -9972,26 +9978,26 @@ router.get(
 
         stats: {
 
-          total_patients:
-            bookings.length,
+  total_patients:
+    bookings.length,
 
-          waiting,
+  waiting,
 
-          called,
+  called,
 
-          checked_in:
-            checkedIn,
+  consultation,
 
-          completed,
+  admitted,
 
-          cancelled,
+  discharged,
 
-          emergency,
+  transferred,
 
-          urgent,
+  referred,
 
-        },
+  completed,
 
+},
         current_patient:
           currentPatient,
 
