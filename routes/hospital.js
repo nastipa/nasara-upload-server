@@ -2420,28 +2420,29 @@ try{
 const userId = req.user.id;
 
 
-const {data,error}=await supabaseAdmin
-.from("hospital_bookings")
-.select(`
+const { data, error } = await supabaseAdmin
+  .from("hospital_bookings")
+  .select(`
   *,
-  hospitals(
+  hospitals!hospital_bookings_hospital_id_fkey(
     id,
     name,
-    city,
-    district,
-    region,
-    phone,
-    address
+    city
+  ),
+  referral_hospital:hospitals!hospital_bookings_referral_hospital_fkey(
+    id,
+    name,
+    city
   ),
   hospital_departments!hospital_bookings_department_id_fkey(
     id,
     name
   )
 `)
-.eq("patient_id", userId)
-.order("created_at",{ascending:false})
-.limit(1)
-.maybeSingle();
+  .eq("patient_id", userId)
+  .order("created_at", { ascending: false })
+  .limit(1)
+  .maybeSingle();
 
 if(error){
 return res.status(400).json({
@@ -9395,6 +9396,136 @@ router.post(
 
         error:
         err.message,
+
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   REFERRAL HISTORY
+   Returns referrals CREATED by the current hospital
+========================================================= */
+
+router.get(
+  "/referral-history",
+  authenticate,
+  async (req, res) => {
+
+    try {
+
+      /* ----------------------------------
+         FIND STAFF
+      ---------------------------------- */
+
+      const {
+        data: staff,
+        error: staffError,
+      } =
+      await supabaseAdmin
+        .from("hospital_department_staff")
+        .select(`
+          hospital_id,
+          department_id,
+          role
+        `)
+        .eq("user_id", req.user.id)
+        .eq("active", true)
+        .maybeSingle();
+
+      if (staffError) {
+
+        return res.status(400).json({
+          success: false,
+          error: staffError.message,
+        });
+
+      }
+
+      if (!staff) {
+
+        return res.status(403).json({
+          success: false,
+          error: "Staff account not found.",
+        });
+
+      }
+
+      /* ----------------------------------
+         LOAD REFERRALS SENT
+      ---------------------------------- */
+
+      const {
+        data,
+        error,
+      } =
+      await supabaseAdmin
+        .from("hospital_referrals")
+        .select(`
+          *,
+          booking:hospital_bookings(
+            id,
+            queue_number
+          ),
+          patient_records(
+            id,
+            full_name,
+            gender,
+            phone
+          ),
+          from_hospital:hospitals!hospital_referrals_from_hospital_id_fkey(
+            id,
+            name
+          ),
+          to_hospital:hospitals!hospital_referrals_to_hospital_id_fkey(
+            id,
+            name
+          )
+        `)
+        .eq(
+          "from_hospital_id",
+          staff.hospital_id
+        )
+        .order(
+          "referred_at",
+          {
+            ascending: false,
+          }
+        );
+
+      if (error) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          error: error.message,
+
+        });
+
+      }
+
+      return res.json({
+
+        success: true,
+
+        referrals: data || [],
+
+      });
+
+    } catch (err) {
+
+      console.log(
+        "Referral History Error:",
+        err
+      );
+
+      return res.status(500).json({
+
+        success: false,
+
+        error: err.message,
 
       });
 
