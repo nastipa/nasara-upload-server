@@ -2823,13 +2823,18 @@ await supabaseAdmin
     created_at,
     called_at,
     arrived_at,
+    consultation_started_at,
+    admitted_at,
+    discharged_at,
+    transferred_at,
+    referred_at,
     completed_at,
     department_id,
     hospital_departments!hospital_bookings_department_id_fkey(
       id,
       name
     )
-  `)
+`)
   .eq("hospital_id", hospitalId)
   .eq("booking_date", today);
 
@@ -3182,14 +3187,6 @@ referred: 0,
   ) {
     departmentMap[id]
       .called++;
-  }
-
-  if (
-    booking.status ===
-    "checked_in"
-  ) {
-    departmentMap[id]
-      .checked_in++;
   }
 
   if (booking.status === "consultation") {
