@@ -5301,7 +5301,39 @@ router.put(
     }
   }
 );
+/* =========================================================
+    HOSPITAL STAFF DEPARTMENT DEPARTMENTS
+========================================================= */
+router.get(
+  "/staff/departments",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
 
+    const hospitalId = req.staff.hospital_id;
+
+    const { data, error } =
+      await supabaseAdmin
+        .from("hospital_departments")
+        .select("*")
+        .eq("hospital_id", hospitalId)
+        .eq("is_active", true)
+        .order("name");
+
+    if (error) {
+      return res.status(400).json({
+        success: false,
+        error: error.message,
+      });
+    }
+
+    return res.json({
+      success: true,
+      departments: data || [],
+    });
+
+  }
+);
 /* =========================================================
    CREATE DEFAULT HOSPITAL DEPARTMENTS
 ========================================================= */
