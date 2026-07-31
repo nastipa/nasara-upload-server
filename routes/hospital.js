@@ -593,47 +593,27 @@ async function savePatientJourney({
   }
 }
 /* =========================================================
-   BUILD VOICE SEQUENCE
+   BUILD HOSPITAL VOICE SEQUENCE
 ========================================================= */
+
 async function buildVoiceSequence(
-  hospitalId,
-  departmentId
+  hospitalId
 ){
 
   const voices = [];
 
-
-  // ALWAYS ADD ENGLISH TTS FIRST
-
-  voices.push({
-
-    language:"en",
-
-    audio_type:"tts",
-
-    audio_url:null
-
-  });
-
-
-
   const {
-    data: departmentLanguages
-  }
-  =
+    data: languages
+  } =
   await supabaseAdmin
-  .from("hospital_department_languages")
+  .from("hospital_announcement_languages")
   .select(`
-    language,
+    language_code,
     display_order
   `)
   .eq(
     "hospital_id",
     hospitalId
-  )
-  .eq(
-    "department_id",
-    departmentId
   )
   .eq(
     "enabled",
@@ -646,21 +626,14 @@ async function buildVoiceSequence(
     }
   );
 
-
-
-  for(
-    const item of departmentLanguages || []
-  ){
-
+  for(const language of languages || []){
 
     const {
-      data: template
-    }
-    =
+      data: recording
+    } =
     await supabaseAdmin
-    .from("hospital_voice_templates")
+    .from("hospital_voice_recordings")
     .select(`
-      language,
       audio_url
     `)
     .eq(
@@ -668,62 +641,61 @@ async function buildVoiceSequence(
       hospitalId
     )
     .eq(
-      "department_id",
-      departmentId
+      "language_code",
+      language.language_code
     )
     .eq(
-      "language",
-      item.language
-    )
-    .eq(
-      "active",
+      "enabled",
       true
     )
     .maybeSingle();
 
-
-
-    console.log(
-      "VOICE LANGUAGE:",
-      item.language,
-      "TEMPLATE:",
-      template
-    );
-
-
-
-    if(template?.audio_url){
+    if(recording?.audio_url){
 
       voices.push({
 
-        language:template.language,
+        language:
+          language.language_code,
 
-        audio_type:"template",
+        audio_type:
+          "recording",
 
-        audio_url:template.audio_url
+        audio_url:
+          recording.audio_url
 
       });
 
-
-    } else {
-
+    }else{
 
       voices.push({
 
-        language:item.language,
+        language:
+          language.language_code,
 
-        audio_type:"tts",
+        audio_type:
+          "tts",
 
         audio_url:null
 
       });
 
-
     }
-
 
   }
 
+  if(voices.length === 0){
+
+    voices.push({
+
+      language:"en",
+
+      audio_type:"tts",
+
+      audio_url:null
+
+    });
+
+  }
 
   return voices;
 
@@ -7946,7 +7918,6 @@ router.post(
 const voices =
 await buildVoiceSequence(
   hospitalId,
-  departmentId
 );
 
 
@@ -7961,7 +7932,7 @@ await supabaseAdmin
 
   hospital_id: hospitalId,
 
-  department_id: departmentId,
+  department_id: null,
 
   booking_id: booking.id,
 
@@ -7970,7 +7941,7 @@ await supabaseAdmin
   queue_number: booking.queue_number,
 
   message:
-`${departmentName} Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
+` Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
 
   voices,
 
@@ -8014,7 +7985,7 @@ if(voiceError){
             "You are being called",
 
          message:
-`${departmentName} Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
+` Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`,
 
           
             type:
@@ -8038,15 +8009,11 @@ if(voiceError){
         booking: data,
 
         voice: {
-
-          queue_number:
-            booking.queue_number,
-
-          message:
-            `Queue ${booking.queue_number}, please proceed to ${req.staff.department_name}.`
-
-        }
-
+  queue_number: booking.queue_number,
+  department: departmentName,
+  message:
+    `Queue Number ${booking.queue_number}. Please proceed to ${departmentName}.`
+}
       });
 
     } catch (err) {
@@ -11173,354 +11140,67 @@ const completed =
 
   }
 );
-/* =========================================================
-   GET NEXT VOICE ANNOUNCEMENT
-========================================================= */
 
-router.get(
-  "/voice-queue",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } =
-      req.departmentStaff;
-
- const { data, error } =
-await supabaseAdmin
-.from("hospital_voice_queue")
-.select(`
-  id,
-  booking_id,
-  queue_number,
-  message,
-  voices,
-  priority,
-  department_id,
-  created_at,
-  hospital_departments (
-    id,
-    name
-  )
-`)
-.eq(
-  "hospital_id",
-  hospital_id
-)
-.eq(
-  "department_id",
-  department_id
-)
-.eq(
-  "played",
-  false
-)
-.order(
-  "priority",
-  {
-    ascending:true
-  }
-)
-.order(
-  "created_at",
-  {
-    ascending:true
-  }
-)
-.limit(1);
-
-      if(error){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:error.message,
-
-        });
-
-      }
-
-
-     return res.json({
-
-  success:true,
-
-  announcement:
-    data?.[0] || null,
-
-});
-    }catch(err){
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:err.message,
-
-      });
-
-    }
-
-  }
-);
-/* =========================================================
-   GET DEPARTMENT VOICE SETTINGS
-   Gets available announcement languages
-   and templates for a department
-========================================================= */
-
-router.get(
-  "/department-voice-settings",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      const {
-        data: languages,
-        error: languageError
-      } =
-      await supabaseAdmin
-        .from(
-          "hospital_announcement_languages"
-        )
-        .select(`
-          id,
-          language_code,
-          language_name,
-          enabled,
-          display_order
-        `)
-        .eq(
-          "hospital_id",
-          hospital_id
-        )
-        .eq(
-          "enabled",
-          true
-        )
-        .order(
-          "display_order",
-          {
-            ascending:true,
-          }
-        );
-
-
-      if(languageError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          languageError.message
-
-        });
-
-      }
-
-
-
-      const {
-        data: templates,
-        error: templateError
-      } =
-      await supabaseAdmin
-        .from(
-          "hospital_announcement_templates"
-        )
-        .select(`
-          id,
-          language_code,
-          template_name,
-          template_text,
-          enabled
-        `)
-        .eq(
-          "hospital_id",
-          hospital_id
-        )
-        .eq(
-          "enabled",
-          true
-        )
-        .order(
-          "template_name",
-          {
-            ascending:true,
-          }
-        );
-
-
-      if(templateError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          templateError.message
-
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        hospital_id,
-
-        department_id,
-
-        languages:
-          languages || [],
-
-        templates:
-          templates || []
-
-      });
-
-
-
-    }catch(err){
-
-      console.log(
-        "Voice settings error:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:
-        err.message
-
-      });
-
-    }
-
-  }
-);
 
 
 /* =========================================================
-   MARK COMPLETE VOICE SEQUENCE PLAYED
+   MARK HOSPITAL ANNOUNCEMENT PLAYED
 ========================================================= */
 
 router.post(
   "/voice-queue/played",
   authenticate,
-  departmentStaffAuth,
+  hospitalDepartmentStaffAuth,
   async(req,res)=>{
 
     try{
 
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
+      const hospitalId =
+        req.staff.hospital_id;
 
-
-      const {
-        booking_id
-      } = req.body;
-
+      const { booking_id } =
+        req.body;
 
       if(!booking_id){
 
         return res.status(400).json({
-
           success:false,
-
           error:"booking_id required"
-
         });
 
       }
 
-
-
-      const {
-        data,
-        error
-      } =
+      const { data, error } =
       await supabaseAdmin
       .from("hospital_voice_queue")
       .update({
-
         played:true,
-
-        played_at:
-          new Date().toISOString()
-
+        played_at:new Date().toISOString()
       })
-      .eq(
-        "booking_id",
-        booking_id
-      )
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      )
+      .eq("booking_id", booking_id)
+      .eq("hospital_id", hospitalId)
       .select();
-
-
 
       if(error){
 
         return res.status(400).json({
-
           success:false,
-
           error:error.message
-
         });
 
       }
 
-
-
       return res.json({
-
         success:true,
-
         announcements:data
-
       });
-
 
     }
     catch(err){
 
       return res.status(500).json({
-
         success:false,
-
         error:err.message
-
       });
 
     }
@@ -11528,181 +11208,52 @@ router.post(
   }
 );
 /* =========================================================
-   UPLOAD VOICE TEMPLATE
+   GET HOSPITAL VOICE
 ========================================================= */
 
-router.post(
-  "/upload-voice-recording",
+router.get(
+  "/hospital-voice",
   authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
+  hospitalAdminAuth,
+  async(req,res)=>{
 
-    try {
+    try{
 
-      const {
-        hospital_id,
-        department_id,
-      } = req.departmentStaff;
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
 
-      const {
+      const { data, error } =
+      await supabaseAdmin
+      .from("hospital_voice_settings")
+      .select(`
+        id,
         language,
         audio_url,
-      } = req.body;
+        updated_at
+      `)
+      .eq("hospital_id", hospitalId)
+      .maybeSingle();
 
-      if (
-        !language ||
-        !audio_url
-      ) {
+      if(error){
 
         return res.status(400).json({
-
-          success: false,
-
-          error:
-            "language and audio_url are required",
-
+          success:false,
+          error:error.message
         });
 
       }
 
-      /*
-      ========================================
-      CHECK IF TEMPLATE EXISTS
-      ========================================
-      */
+      return res.json({
+        success:true,
+        voice:data || null
+      });
 
-      const {
-        data: existing,
-      } =
-      await supabaseAdmin
-      .from("hospital_voice_templates")
-      .select("id")
-      .eq("hospital_id", hospital_id)
-      .eq("department_id", department_id)
-      .eq("language", language)
-      .maybeSingle();
-
-      let data;
-      let error;
-
-      /*
-      ========================================
-      UPDATE EXISTING TEMPLATE
-      ========================================
-      */
-
-      if (existing) {
-
-        ({
-          data,
-          error,
-        } =
-        await supabaseAdmin
-        .from("hospital_voice_templates")
-        .update({
-
-          audio_url,
-
-          created_by:
-            req.user.id,
-
-          active: true,
-
-        })
-        .eq("id", existing.id)
-        .select()
-        .single());
-
-      }
-
-      /*
-      ========================================
-      CREATE NEW TEMPLATE
-      ========================================
-      */
-
-      else {
-
-        ({
-          data,
-          error,
-        } =
-        await supabaseAdmin
-        .from("hospital_voice_templates")
-        .insert({
-
-          hospital_id,
-
-          department_id,
-
-          language,
-
-          audio_url,
-
-          active: true,
-
-          created_by:
-            req.user.id,
-
-        })
-        .select()
-        .single());
-
-      }
-
-      if (error) {
-
-  return res.status(400).json({
-
-    success: false,
-
-    error: error.message,
-
-  });
-
-}
-
-/*
-========================================
-AUTO-ENABLE THIS LANGUAGE FOR DEPARTMENT
-========================================
-*/
-
-await supabaseAdmin
-  .from("hospital_department_languages")
-  .upsert(
-    {
-      hospital_id,
-      department_id,
-      language,
-      enabled: true,
-    },
-    {
-      onConflict:
-        "hospital_id,department_id,language",
     }
-  );
-
-return res.json({
-
-  success: true,
-
-  template: data,
-
-});
-    } catch (err) {
-
-      console.log(
-        "Voice template upload error:",
-        err
-      );
+    catch(err){
 
       return res.status(500).json({
-
-        success: false,
-
-        error: err.message,
-
+        success:false,
+        error:err.message
       });
 
     }
@@ -11711,699 +11262,79 @@ return res.json({
 );
 
 /* =========================================================
-   GET VOICE TEMPLATE
+   SAVE OR UPDATE HOSPITAL VOICE
 ========================================================= */
 
-router.get(
-  "/voice-template",
+router.post(
+  "/hospital-voice",
   authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
+  hospitalAdminAuth,
+  async(req,res)=>{
 
-    try {
+    try{
 
-      const {
-        hospital_id,
-        department_id,
-      } = req.departmentStaff;
-
+      const hospitalId =
+        req.hospitalAdmin.hospital_id;
 
       const {
         language = "en",
-        template_type = "queue_call",
-      } = req.query;
-
-
-
-      const {
-        data,
-        error,
-      } =
-      await supabaseAdmin
-      .from("hospital_voice_templates")
-      .select(`
-        id,
-        hospital_id,
-        department_id,
-        language,
-        template_type,
-        audio_url,
-        active,
-        updated_at
-      `)
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      )
-      .eq(
-        "language",
-        language
-      )
-      .eq(
-        "template_type",
-        template_type
-      )
-      .eq(
-        "active",
-        true
-      )
-      .maybeSingle();
-
-
-
-      if (error) {
-
-        return res.status(400).json({
-
-          success: false,
-
-          error: error.message,
-
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success: true,
-
-        template: data || null,
-
-      });
-
-
-
-    } catch (err) {
-
-
-      console.log(
-        "Get voice template error:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success: false,
-
-        error: err.message,
-
-      });
-
-
-    }
-
-  }
-);
-
-/* =========================================================
-   UPLOAD VOICE TEMPLATE
-========================================================= */
-
-router.post(
-  "/upload-voice-template",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id,
-      } = req.departmentStaff;
-
-
-      const {
-        language,
-        template_type,
-        audio_url,
+        audio_url
       } = req.body;
 
-
-
-      if (
-        !language ||
-        !template_type ||
-        !audio_url
-      ) {
+      if(!audio_url){
 
         return res.status(400).json({
-
           success:false,
-
-          error:"Missing template information"
-
+          error:"audio_url is required"
         });
 
       }
 
-
-
-      const {
-        data,
-        error
-      } =
+      const { data, error } =
       await supabaseAdmin
-      .from(
-        "hospital_voice_templates"
+      .from("hospital_voice_settings")
+      .upsert(
+        {
+          hospital_id:hospitalId,
+          language,
+          audio_url,
+          created_by:req.user.id,
+          updated_at:new Date().toISOString()
+        },
+        {
+          onConflict:"hospital_id"
+        }
       )
-      .insert({
-
-        hospital_id,
-
-        department_id,
-
-        language,
-
-        template_type,
-
-        audio_url,
-
-        active:true
-
-      })
       .select()
       .single();
 
-
-
-      if(error){
-
-        throw error;
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        template:data
-
-      });
-
-
-
-    }
-    catch(error){
-
-
-      console.log(
-        "Upload voice template error:",
-        error
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:error.message
-
-      });
-
-
-    }
-
-  }
-);
-/* =========================================================
-   MY VOICE TEMPLATES
-========================================================= */
-router.get(
-"/voice-templates",
-authenticate,
-departmentStaffAuth,
-async(req,res)=>{
-
-try{
-
-const {
-hospital_id,
-department_id
-}
-=
-req.departmentStaff;
-
-
-const {
-data,
-error
-}
-=
-await supabaseAdmin
-.from("hospital_voice_templates")
-.select(`
-id,
-language,
-template_type,
-audio_url,
-active,
-updated_at
-`)
-.eq(
-"hospital_id",
-hospital_id
-)
-.eq(
-"department_id",
-department_id
-)
-.order(
-"created_at",
-{
-ascending:false
-}
-);
-
-
-if(error){
-
-return res.status(400).json({
-success:false,
-error:error.message
-});
-
-}
-
-
-return res.json({
-
-success:true,
-
-templates:data || []
-
-});
-
-
-}
-catch(error){
-
-return res.status(500).json({
-
-success:false,
-
-error:error.message
-
-});
-
-}
-
-});
-
-/* =========================================================
-   GET VOICE RECORDINGS
-   Hospital staff list available announcement voices
-========================================================= */
-
-router.get(
-  "/voice-recordings",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      const {
-        data,
-        error
-      } =
-      await supabaseAdmin
-      .from(
-        "hospital_voice_recordings"
-      )
-      .select(`
-        id,
-        language_code,
-        voice_name,
-        audio_url,
-        enabled,
-        created_at
-      `)
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      )
-      .eq(
-        "enabled",
-        true
-      )
-      .order(
-        "created_at",
-        {
-          ascending:false
-        }
-      );
-
-
       if(error){
 
         return res.status(400).json({
-
           success:false,
-
           error:error.message
-
         });
 
       }
 
-
       return res.json({
-
         success:true,
-
-        recordings:
-          data || []
-
+        voice:data
       });
 
-
-
-    }catch(err){
-
-      console.log(
-        "Voice recordings error:",
-        err
-      );
-
+    }
+    catch(err){
 
       return res.status(500).json({
-
         success:false,
-
         error:err.message
-
       });
 
     }
 
   }
 );
-/* =========================================================
-   UPLOAD VOICE RECORDING
-   Department staff records local language announcement
-========================================================= */
 
-router.post(
-  "/upload-voice-recording",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      const {
-        booking_id,
-        queue_number,
-        language,
-        audio_url,
-        message
-      } = req.body;
-
-
-      if (
-        !booking_id ||
-        !queue_number ||
-        !audio_url ||
-        !language
-      ) {
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          "booking_id, queue_number, language and audio_url are required"
-
-        });
-
-      }
-
-
-      /*
-        Save voice announcement
-      */
-
-      const {
-        data,
-        error
-      } =
-      await supabaseAdmin
-      .from(
-        "hospital_voice_queue"
-      )
-      .insert({
-
-        hospital_id,
-
-        department_id,
-
-        booking_id,
-
-        queue_number,
-
-        message:
-          message ||
-          `Queue ${queue_number}, please proceed.`,
-
-        language,
-
-        audio_url,
-
-        audio_type:
-        "recording",
-
-        played:false,
-
-      })
-      .select()
-      .single();
-
-
-
-      if(error){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:error.message
-
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        announcement:data
-
-      });
-
-
-
-    }catch(err){
-
-      console.log(
-        "Upload voice error:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:err.message
-
-      });
-
-    }
-
-  }
-);
-/* =========================================================
-   GET DEPARTMENT VOICE SETTINGS
-   Returns enabled announcement languages
-   and templates for department staff
-========================================================= */
-
-router.get(
-  "/department-voice-settings",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      /*
-        Load enabled languages
-      */
-
-      const {
-        data: languages,
-        error: languageError
-      } =
-      await supabaseAdmin
-      .from(
-        "hospital_announcement_languages"
-      )
-      .select(`
-        id,
-        language_code,
-        language_name,
-        display_order
-      `)
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "enabled",
-        true
-      )
-      .order(
-        "display_order",
-        {
-          ascending:true
-        }
-      );
-
-
-      if(languageError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          languageError.message
-
-        });
-
-      }
-
-
-
-      /*
-        Load announcement templates
-      */
-
-      const {
-        data: templates,
-        error: templateError
-      }
-      =
-      await supabaseAdmin
-      .from(
-        "hospital_announcement_templates"
-      )
-      .select(`
-        id,
-        language_code,
-        template_name,
-        template_text
-      `)
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "enabled",
-        true
-      );
-
-
-
-      if(templateError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          templateError.message
-
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        department_id,
-
-        languages:
-          languages || [],
-
-        templates:
-          templates || [],
-
-        default_language:
-          "en"
-
-      });
-
-
-
-    }catch(err){
-
-      console.log(
-        "Voice settings error:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:
-        err.message
-
-      });
-
-    }
-
-  }
-);
 /* =========================================================
    CREATE DEFAULT VOICE LANGUAGES
    Add default Ghana announcement languages
@@ -12412,14 +11343,13 @@ router.get(
 router.post(
   "/create-default-voice-languages",
   authenticate,
+  hospitalAdminAuth,
   async (req, res) => {
 
     try {
 
-      const {
-        hospital_id
-      } = req.body;
-
+      const hospital_id =
+  req.hospitalAdmin.hospital_id;
 
       if(!hospital_id){
 
@@ -12559,282 +11489,7 @@ router.post(
 
   }
 );
-/* =========================================================
-   DELETE VOICE RECORDING
-   Remove hospital voice file record
-========================================================= */
 
-router.delete(
-  "/voice-recordings/:id",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      const {
-        id
-      } = req.params;
-
-
-      if(!id){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          "Voice recording id required"
-
-        });
-
-      }
-
-
-      const {
-        data: recording,
-        error: findError
-      }
-      =
-      await supabaseAdmin
-      .from(
-        "hospital_voice_recordings"
-      )
-      .select("*")
-      .eq(
-        "id",
-        id
-      )
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      )
-      .maybeSingle();
-
-
-
-      if(findError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          findError.message
-
-        });
-
-      }
-
-
-
-      if(!recording){
-
-        return res.status(404).json({
-
-          success:false,
-
-          error:
-          "Voice recording not found"
-
-        });
-
-      }
-
-
-
-      const {
-        error: deleteError
-      }
-      =
-      await supabaseAdmin
-      .from(
-        "hospital_voice_recordings"
-      )
-      .delete()
-      .eq(
-        "id",
-        id
-      )
-      .eq(
-        "hospital_id",
-        hospital_id
-      )
-      .eq(
-        "department_id",
-        department_id
-      );
-
-
-
-      if(deleteError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:
-          deleteError.message
-
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        message:
-        "Voice recording deleted"
-
-      });
-
-
-
-    }catch(err){
-
-      console.log(
-        "Delete voice error:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:
-        err.message
-
-      });
-
-    }
-
-  }
-);
-/* =========================================================
-   DELETE VOICE TEMPLATE
-========================================================= */
-
-router.delete(
-  "/delete-voice-template/:id",
-  authenticate,
-  departmentStaffAuth,
-  async (req, res) => {
-
-    try {
-
-      const {
-        hospital_id,
-        department_id
-      } = req.departmentStaff;
-
-
-      const {
-        id
-      } = req.params;
-
-
-      const {
-        data: template,
-        error: findError
-      } =
-      await supabaseAdmin
-      .from("hospital_voice_templates")
-      .select("id")
-      .eq("id", id)
-      .eq("hospital_id", hospital_id)
-      .eq("department_id", department_id)
-      .maybeSingle();
-
-
-      if(findError){
-
-        return res.status(400).json({
-          success:false,
-          error:findError.message
-        });
-
-      }
-
-
-      if(!template){
-
-        return res.status(404).json({
-          success:false,
-          error:"Voice template not found"
-        });
-
-      }
-
-
-
-      const {
-        error
-      } =
-      await supabaseAdmin
-      .from("hospital_voice_templates")
-      .delete()
-      .eq("id", id)
-      .eq("hospital_id", hospital_id)
-      .eq("department_id", department_id);
-
-
-
-      if(error){
-
-        return res.status(400).json({
-          success:false,
-          error:error.message
-        });
-
-      }
-
-
-
-      return res.json({
-
-        success:true,
-
-        message:
-        "Voice template deleted"
-
-      });
-
-
-    }
-    catch(err){
-
-      console.log(
-        "DELETE VOICE TEMPLATE ERROR:",
-        err
-      );
-
-
-      return res.status(500).json({
-
-        success:false,
-
-        error:err.message
-
-      });
-
-    }
-
-  }
-);
 /* =========================================================
    GET SINGLE HOSPITAL
 ========================================================= */
