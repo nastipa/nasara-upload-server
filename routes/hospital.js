@@ -598,156 +598,95 @@ async function savePatientJourney({
 ========================================================= */
 
 async function buildVoiceSequence(
-  hospitalId
+  hospitalId,
+  departmentId
 ){
 
-  const voices = [];
+const voices = [];
 
 
-  const {
-    data: languages,
-    error: languageError
-  } =
-  await supabaseAdmin
-  .from("hospital_announcement_languages")
-  .select(`
-    language_code,
-    display_order
-  `)
-  .eq(
-    "hospital_id",
-    hospitalId
-  )
-  .eq(
-    "enabled",
-    true
-  )
-  .order(
-    "display_order",
-    {
-      ascending:true
-    }
-  );
+const {
+data:templates,
+error
+}
+=
+await supabaseAdmin
+.from("hospital_voice_templates")
+.select(`
+language,
+audio_url,
+template_type
+`)
+.eq(
+"hospital_id",
+hospitalId
+)
+.eq(
+"department_id",
+departmentId
+)
+.eq(
+"template_type",
+"queue_call"
+)
+.eq(
+"active",
+true
+)
+.order(
+"created_at",
+{
+ascending:true
+}
+);
 
 
-  if(languageError){
+if(error){
 
-    console.log(
-      "Language load error:",
-      languageError
-    );
+console.log(
+"VOICE TEMPLATE ERROR",
+error
+);
 
-  }
-
-
-
-  for(const language of languages || []){
-
-
-    const {
-      data: recording,
-      error: recordingError
-    }
-    =
-    await supabaseAdmin
-    .from(
-      "hospital_voice_recordings"
-    )
-    .select(`
-      audio_url
-    `)
-    .eq(
-      "hospital_id",
-      hospitalId
-    )
-    .eq(
-      "language_code",
-      language.language_code
-    )
-    .eq(
-      "enabled",
-      true
-    )
-    .maybeSingle();
+}
 
 
 
-    if(recordingError){
+for(const item of templates || []){
 
-      console.log(
-        "Voice recording error:",
-        recordingError
-      );
+voices.push({
 
-    }
+language:
+item.language,
 
+audio_type:
+"recording",
 
+audio_url:
+item.audio_url
 
-    if(recording?.audio_url){
+});
 
-
-      voices.push({
-
-        language:
-        language.language_code,
-
-
-        audio_type:
-        "recording",
-
-
-        audio_url:
-        recording.audio_url
-
-      });
+}
 
 
 
-    }
-    else{
+if(voices.length===0){
+
+voices.push({
+
+language:"en",
+
+audio_type:"tts",
+
+audio_url:null
+
+});
+
+}
 
 
-      voices.push({
-
-        language:
-        language.language_code,
-
-
-        audio_type:
-        "tts",
-
-
-        audio_url:
-        null
-
-      });
-
-
-    }
-
-  }
-
-
-
-  // Always fallback
-  if(
-    voices.length === 0
-  ){
-
-    voices.push({
-
-      language:"en",
-
-      audio_type:"tts",
-
-      audio_url:null
-
-    });
-
-  }
-
-
-  return voices;
+return voices;
 
 }
 /* =========================================================
@@ -8000,6 +7939,7 @@ router.post(
 const voices =
 await buildVoiceSequence(
   hospitalId,
+  departmentId
 );
 
 
@@ -11289,59 +11229,7 @@ router.post(
 
   }
 );
-/* =========================================================
-   GET HOSPITAL VOICE
-========================================================= */
 
-router.get(
-  "/hospital-voice",
-  authenticate,
-  hospitalAdminAuth,
-  async(req,res)=>{
-
-    try{
-
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
-
-      const { data, error } =
-      await supabaseAdmin
-      .from("hospital_voice_settings")
-      .select(`
-        id,
-        language,
-        audio_url,
-        updated_at
-      `)
-      .eq("hospital_id", hospitalId)
-      .maybeSingle();
-
-      if(error){
-
-        return res.status(400).json({
-          success:false,
-          error:error.message
-        });
-
-      }
-
-      return res.json({
-        success:true,
-        voice:data || null
-      });
-
-    }
-    catch(err){
-
-      return res.status(500).json({
-        success:false,
-        error:err.message
-      });
-
-    }
-
-  }
-);
 
 /* =========================================================
    UPLOAD / UPDATE VOICE TEMPLATE
@@ -11464,9 +11352,8 @@ router.post(
 
         {
 
-          onConflict:
-          "hospital_id,department_id,language,template_type"
-
+         onConflict:
+"hospital_id,department_id,language"
         }
 
       )
