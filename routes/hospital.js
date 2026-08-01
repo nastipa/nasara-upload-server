@@ -5767,7 +5767,7 @@ authenticate,
     const updates = {
       status,
     };
-
+   let voiceAnnouncement = null;
     if (status === "called") {
       updates.called_at = new Date().toISOString();
     }
@@ -6116,6 +6116,12 @@ const voices =
 await buildVoiceSequence(
   booking.hospital_id
 );
+ voiceAnnouncement = {
+  booking_id: booking.id,
+  queue_number: booking.queue_number,
+  department_name: departmentName,
+  voices,
+};
 
 // 3. Insert single voice queue with multiple languages
 
@@ -6220,6 +6226,7 @@ if (
     return res.json({
       success: true,
       booking: data,
+      voiceAnnouncement,
     });
 
   } catch (err) {
@@ -8042,7 +8049,12 @@ const voices =
 await buildVoiceSequence(
   hospitalId
 );
-
+const voiceAnnouncement = {
+  booking_id: booking.id,
+  queue_number: booking.queue_number,
+  department_name: departmentName,
+  voices,
+};
 
 /* --------------------------------
    SAVE SINGLE VOICE ANNOUNCEMENT
