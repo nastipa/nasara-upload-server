@@ -11177,7 +11177,138 @@ const completed =
 
   }
 );
+/* =========================================================
+   GET HOSPITAL VOICE QUEUE
+   Department Staff Voice Board
+========================================================= */
 
+router.get(
+  "/voice-queue",
+  authenticate,
+  hospitalDepartmentStaffAuth,
+  async (req, res) => {
+
+    try {
+
+      const hospitalId =
+        req.staff.hospital_id;
+
+      const departmentId =
+        req.staff.department_id;
+
+
+      /*
+        Get next unplayed announcement
+      */
+
+      const {
+        data,
+        error
+      } =
+      await supabaseAdmin
+        .from("hospital_voice_queue")
+        .select(`
+          id,
+          booking_id,
+          queue_number,
+          message,
+          voices,
+          priority,
+          created_at,
+
+          hospital_departments(
+            id,
+            name
+          )
+        `)
+        .eq(
+          "hospital_id",
+          hospitalId
+        )
+        .eq(
+          "department_id",
+          departmentId
+        )
+        .eq(
+          "played",
+          false
+        )
+        .order(
+          "priority",
+          {
+            ascending:true
+          }
+        )
+        .order(
+          "created_at",
+          {
+            ascending:true
+          }
+        )
+        .limit(1)
+        .maybeSingle();
+
+
+
+      if(error){
+
+        return res.status(400).json({
+
+          success:false,
+
+          error:error.message
+
+        });
+
+      }
+
+
+
+      if(!data){
+
+        return res.json({
+
+          success:true,
+
+          announcement:null
+
+        });
+
+      }
+
+
+
+      return res.json({
+
+        success:true,
+
+        announcement:data
+
+      });
+
+
+
+    }
+    catch(err){
+
+      console.log(
+        "VOICE QUEUE FETCH ERROR",
+        err
+      );
+
+
+      return res.status(500).json({
+
+        success:false,
+
+        error:err.message
+
+      });
+
+    }
+
+  }
+);
 
 
 /* =========================================================
