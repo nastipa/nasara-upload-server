@@ -593,6 +593,92 @@ async function savePatientJourney({
   }
 }
 /* =========================================================
+   HOSPITAL VOICE ACCESS AUTH
+========================================================= */
+
+async function hospitalVoiceAccessAuth(req,res,next){
+
+  try {
+
+    const userId = req.user.id;
+
+
+    // Check department staff
+    const {data: staff} =
+      await supabaseAdmin
+      .from("hospital_department_staff")
+      .select(`
+        hospital_id,
+        department_id
+      `)
+      .eq("user_id", userId)
+      .eq("active", true)
+      .maybeSingle();
+
+
+    if(staff){
+
+      req.staff = staff;
+      return next();
+
+    }
+
+
+
+    // Check hospital admin
+
+    const {data: admin} =
+      await supabaseAdmin
+      .from("hospital_admins")
+      .select(`
+        hospital_id
+      `)
+      .eq("user_id", userId)
+      .maybeSingle();
+
+
+    if(admin){
+
+      req.staff = {
+
+        hospital_id:
+        admin.hospital_id,
+
+        department_id:
+        null
+
+      };
+
+      return next();
+
+    }
+
+
+
+    return res.status(403).json({
+
+      success:false,
+
+      error:"No voice board permission"
+
+    });
+
+
+  }
+  catch(err){
+
+    return res.status(500).json({
+
+      success:false,
+
+      error:err.message
+
+    });
+
+  }
+
+}
+/* =========================================================
    BUILD HOSPITAL VOICE SEQUENCE
    Hospital-wide recordings only
 ========================================================= */
@@ -11185,7 +11271,7 @@ const completed =
 router.get(
   "/voice-queue",
   authenticate,
-  hospitalDepartmentStaffAuth,
+hospitalVoiceAccessAuth,
   async (req, res) => {
 
     try {
@@ -11201,52 +11287,50 @@ router.get(
         Get next unplayed announcement
       */
 
-      const {
-        data,
-        error
-      } =
-      await supabaseAdmin
-        .from("hospital_voice_queue")
-        .select(`
-          id,
-          booking_id,
-          queue_number,
-          message,
-          voices,
-          priority,
-          created_at,
+      let query =
+  supabaseAdmin
+    .from("hospital_voice_queue")
+    .select(`
+      id,
+      booking_id,
+      queue_number,
+      message,
+      voices,
+      priority,
+      created_at,
 
-          hospital_departments(
-            id,
-            name
-          )
-        `)
-        .eq(
-          "hospital_id",
-          hospitalId
-        )
-        .eq(
-          "department_id",
-          departmentId
-        )
-        .eq(
-          "played",
-          false
-        )
-        .order(
-          "priority",
-          {
-            ascending:true
-          }
-        )
-        .order(
-          "created_at",
-          {
-            ascending:true
-          }
-        )
-        .limit(1)
-        .maybeSingle();
+      hospital_departments(
+        id,
+        name
+      )
+    `)
+    .eq("hospital_id", hospitalId)
+    .eq("played", false);
+
+// Only filter by department for department staff
+if (req.staff.department_id) {
+
+  query =
+    query.eq(
+      "department_id",
+      req.staff.department_id
+    );
+
+}
+
+const {
+  data,
+  error
+} =
+await query
+  .order("priority", {
+    ascending: true,
+  })
+  .order("created_at", {
+    ascending: true,
+  })
+  .limit(1)
+  .maybeSingle();
 
 
 
