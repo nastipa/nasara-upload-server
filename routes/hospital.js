@@ -2145,7 +2145,7 @@ const {
             .maybeSingle();
 
 
-          current = checkedIn;
+          current = consultation;
 
         }
 
@@ -2193,10 +2193,8 @@ const {
           );
 
 
-
         const queue =
           waiting || [];
-
 
 
         boards.push({
@@ -2224,7 +2222,7 @@ const {
             ).length,
 
 
-          checked_in_count:
+          consultation_count:
             queue.filter(
               x =>
               x.status === "in_consultation"
@@ -2251,9 +2249,6 @@ const {
 
 
       }
-
-
-
       return res.json({
 
         success:true,
@@ -2308,7 +2303,7 @@ router.get(
     .eq("booking_date", today)
     .in("status", [
       "waiting",
-      "checked_in",
+      "in_consultation",
       "called",
     ])
     .order("created_at", {
@@ -2368,14 +2363,14 @@ if (!currentServing) {
       .eq("hospital_id", booking.hospital_id)
       .eq("department_id", booking.department_id)
       .eq("booking_date", today)
-      .eq("status", "checked_in")
+      .eq("status", "in_consultation")
       .order("updated_at", {
         ascending: false,
       })
       .limit(1)
       .maybeSingle();
 
-  currentServing = checkedIn;
+  currentServing = consultation;
 
 }
       // Next patients waiting
@@ -2418,7 +2413,7 @@ const { count: waitingCount } =
     .eq("booking_date", today)
     .in("status", [
       "waiting",
-      "checked_in",
+      "in_consultation",
     ])
     .lt("queue_position", booking.queue_position);
 
