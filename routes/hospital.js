@@ -594,101 +594,118 @@ async function savePatientJourney({
 }
 /* =========================================================
    BUILD HOSPITAL VOICE SEQUENCE
-   Hospital-wide voice recordings
+   Hospital-wide recordings only
 ========================================================= */
 
-async function buildVoiceSequence(
-  hospitalId,
-  departmentId
-){
+async function buildVoiceSequence(hospitalId) {
 
-const voices = [];
+  const voices = [];
 
+  /* ----------------------------------
+     Enabled languages
+  ---------------------------------- */
 
-const {
-data:templates,
-error
+  const {
+    data: languages,
+    error: languageError,
+  } =
+  await supabaseAdmin
+    .from("hospital_announcement_languages")
+    .select(`
+      language_code,
+      display_order
+    `)
+    .eq("hospital_id", hospitalId)
+    .eq("enabled", true)
+    .order("display_order", {
+      ascending: true,
+    });
+
+  if (languageError) {
+    console.log(
+      "VOICE LANGUAGE ERROR",
+      languageError.message
+    );
+  }
+
+  /* ----------------------------------
+     Build sequence
+  ---------------------------------- */
+
+  for (const language of languages || []) {
+
+    const {
+      data: template,
+      error: templateError,
+    } =
+    await supabaseAdmin
+      .from("hospital_voice_templates")
+      .select(`
+        audio_url
+      `)
+      .eq("hospital_id", hospitalId)
+      .eq("language", language.language_code)
+      .eq("template_type", "queue_call")
+      .eq("active", true)
+      .maybeSingle();
+
+    if (templateError) {
+      console.log(
+        "VOICE TEMPLATE ERROR",
+        templateError.message
+      );
+    }
+
+    if (template?.audio_url) {
+
+      voices.push({
+
+        language: language.language_code,
+
+        audio_type: "recording",
+
+        audio_url: template.audio_url,
+
+      });
+
+    } else {
+
+      voices.push({
+
+        language: language.language_code,
+
+        audio_type: "tts",
+
+        audio_url: null,
+
+      });
+
+    }
+
+  }
+
+  /* ----------------------------------
+     Safety fallback
+  ---------------------------------- */
+
+  if (voices.length === 0) {
+
+    voices.push({
+
+      language: "en",
+
+      audio_type: "tts",
+
+      audio_url: null,
+
+    });
+
+  }
+
+  return voices;
+
 }
-=
-await supabaseAdmin
-.from("hospital_voice_templates")
-.select(`
-language,
-audio_url,
-template_type
-`)
-.eq(
-"hospital_id",
-hospitalId
-)
-.eq(
-"department_id",
-departmentId
-)
-.eq(
-"template_type",
-"queue_call"
-)
-.eq(
-"active",
-true
-)
-.order(
-"created_at",
-{
-ascending:true
-}
-);
 
-
-if(error){
-
-console.log(
-"VOICE TEMPLATE ERROR",
-error
-);
-
-}
-
-
-
-for(const item of templates || []){
-
-voices.push({
-
-language:
-item.language,
-
-audio_type:
-"recording",
-
-audio_url:
-item.audio_url
-
-});
-
-}
-
-
-
-if(voices.length===0){
-
-voices.push({
-
-language:"en",
-
-audio_type:"tts",
-
-audio_url:null
-
-});
-
-}
-
-
-return voices;
-
-}
 /* =========================================================
    GET ALL ACTIVE HOSPITALS
 ========================================================= */
@@ -6011,8 +6028,7 @@ BUILD VOICE SEQUENCE
 
 const voices =
 await buildVoiceSequence(
-  booking.hospital_id,
-  booking.department_id
+  booking.hospital_id
 );
 
 // 3. Insert single voice queue with multiple languages
@@ -7938,8 +7954,7 @@ router.post(
 
 const voices =
 await buildVoiceSequence(
-  hospitalId,
-  departmentId
+  hospitalId
 );
 
 
