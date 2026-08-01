@@ -11425,13 +11425,10 @@ router.get(
   hospitalAdminAuth,
   async(req,res)=>{
 
-
     try{
-
 
       const hospital_id =
       req.hospitalAdmin.hospital_id;
-
 
 
       const {
@@ -11443,16 +11440,12 @@ router.get(
       .from("hospital_voice_templates")
       .select(`
         id,
-        department_id,
         language,
         template_type,
         audio_url,
         active,
         created_at,
-        updated_at,
-        hospital_departments(
-          name
-        )
+        updated_at
       `)
       .eq(
         "hospital_id",
@@ -11466,19 +11459,14 @@ router.get(
       );
 
 
-
       if(error){
 
         return res.status(400).json({
-
           success:false,
-
           error:error.message
-
         });
 
       }
-
 
 
       return res.json({
@@ -11490,10 +11478,8 @@ router.get(
       });
 
 
-
     }
     catch(error){
-
 
       return res.status(500).json({
 
@@ -11503,14 +11489,10 @@ router.get(
 
       });
 
-
     }
-
 
   }
 );
-
-
 
 
 /* =========================================================
