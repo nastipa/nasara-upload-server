@@ -2145,7 +2145,7 @@ const {
             .maybeSingle();
 
 
-          current = consultation;
+          current = checkedIn;
 
         }
 
