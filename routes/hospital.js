@@ -11273,7 +11273,6 @@ router.post(
 
 
       if (
-        !department_id ||
         !language ||
         !audio_url
       ) {
@@ -11283,7 +11282,7 @@ router.post(
           success:false,
 
           error:
-          "department_id, language and audio_url are required"
+          "language and audio_url are required"
 
         });
 
@@ -11336,46 +11335,36 @@ router.post(
 
 
       const {
-        data,
-        error
-      }
-      =
-      await supabaseAdmin
-      .from("hospital_voice_templates")
-      .upsert(
+  data,
+  error
+}
+=
+await supabaseAdmin
+.from("hospital_voice_templates")
+.upsert(
+{
+  hospital_id,
 
-        {
+  language,
 
-          hospital_id,
+  template_type,
 
-          department_id,
+  audio_url,
 
-          language,
+  active:true,
 
-          template_type,
+  created_by:req.user.id,
 
-          audio_url,
+  updated_at:new Date().toISOString()
 
-          active:true,
-
-          created_by:req.user.id,
-
-          updated_at:
-          new Date().toISOString()
-
-        },
-
-        {
-
-         onConflict:
-"hospital_id,department_id,language"
-        }
-
-      )
-      .select()
-      .single();
-
-
+},
+{
+  onConflict:
+  "hospital_id,language,template_type"
+}
+)
+.select()
+.single();
 
       if(error){
 
