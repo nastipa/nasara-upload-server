@@ -1815,7 +1815,7 @@ router.get(
           [
             "waiting",
             "called",
-            "checked_in"
+            "in_consultation"
           ]
         )
         .order(
@@ -2182,7 +2182,7 @@ const {
             [
               "waiting",
               "called",
-              "checked_in",
+              "in_consultation",
             ]
           )
           .order(
@@ -2227,7 +2227,7 @@ const {
           checked_in_count:
             queue.filter(
               x =>
-              x.status === "checked_in"
+              x.status === "in_consultation"
             ).length,
 
 
