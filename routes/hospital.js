@@ -2133,7 +2133,7 @@ const {
             )
             .eq(
               "status",
-              "checked_in"
+              "in_consultation"
             )
             .order(
               "arrived_at",
