@@ -11264,7 +11264,6 @@ router.post(
 
 
       const {
-        department_id,
         language,
         template_type = "queue_call",
         audio_url,
@@ -11290,81 +11289,39 @@ router.post(
 
 
 
-      // Verify department belongs to hospital
-
       const {
-        data: department,
-        error: deptError
-      } =
+        data,
+        error
+      }
+      =
       await supabaseAdmin
-      .from("hospital_departments")
-      .select("id")
-      .eq("id", department_id)
-      .eq("hospital_id", hospital_id)
-      .maybeSingle();
+      .from("hospital_voice_templates")
+      .upsert(
+      {
+
+        hospital_id,
+
+        language,
+
+        template_type,
+
+        audio_url,
+
+        active:true,
+
+        created_by:req.user.id,
+
+        updated_at:new Date().toISOString()
+
+      },
+      {
+        onConflict:
+        "hospital_id,language,template_type"
+      })
+      .select()
+      .single();
 
 
-
-      if(deptError){
-
-        return res.status(400).json({
-
-          success:false,
-
-          error:deptError.message
-
-        });
-
-      }
-
-
-
-      if(!department){
-
-        return res.status(404).json({
-
-          success:false,
-
-          error:
-          "Department not found"
-
-        });
-
-      }
-
-
-
-      const {
-  data,
-  error
-}
-=
-await supabaseAdmin
-.from("hospital_voice_templates")
-.upsert(
-{
-  hospital_id,
-
-  language,
-
-  template_type,
-
-  audio_url,
-
-  active:true,
-
-  created_by:req.user.id,
-
-  updated_at:new Date().toISOString()
-
-},
-{
-  onConflict:
-  "hospital_id,language,template_type"
-}
-)
-.select()
-.single();
 
       if(error){
 
@@ -11411,7 +11368,6 @@ await supabaseAdmin
 
   }
 );
-
 
 
 /* =========================================================
