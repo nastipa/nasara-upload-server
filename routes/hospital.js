@@ -6322,23 +6322,13 @@ await savePatientJourney({
 await supabaseAdmin
 .from("hospital_notifications")
 .insert({
-
-  hospital_id: booking.hospital_id,
-
-  patient_id: booking.patient_id,
-
-  booking_id: booking.id,
-
-  department_id: booking.department_id,
-
-  title,
-
-  message: body,
-
-  type: status,
-
-  read: false,
-
+hospital_id: booking.hospital_id,
+patient_id: booking.patient_id,
+patient_record_id: booking.patient_record_id,
+booking_id: booking.id,
+title,
+message: body,
+is_read: false,
 });
     }
     
@@ -10492,7 +10482,7 @@ await supabaseAdmin
   id,
   title,
   message,
-  read,
+  is_read,
   created_at,
 
   hospital_bookings(
@@ -10539,7 +10529,7 @@ title:item.title,
 message:item.message,
 
 
-is_read:item.read,
+is_read:item.is_read,
 
 created_at:item.created_at,
 
