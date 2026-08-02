@@ -6041,15 +6041,15 @@ authenticate,
 
 }
 
-if (status === "completed") {
+if (status === "admitted") {
 
   updates.completed_at = new Date().toISOString();
 
 }
+if (status === "discharged") {
 
-if (status === "admitted") {
-
-  updates.completed_at = new Date().toISOString();
+  updates.discharged_at =
+    new Date().toISOString();
 
 }
 
@@ -6211,13 +6211,14 @@ switch (status) {
     journeyAction = "Consultation Started";
     break;
 
-  case "completed":
-    journeyAction = "Consultation Completed";
-    break;
 
   case "admitted":
     journeyAction = "Patient Admitted";
     break;
+  
+    case "discharged":
+  journeyAction = "Patient Discharged";
+  break;
 
   case "transferred":
     journeyAction = "Transferred";
@@ -6275,17 +6276,17 @@ await savePatientJourney({
       "Your consultation has started. Please remain with the healthcare provider.";
     break;
 
-  case "completed":
-    title = "Consultation Completed";
-    body =
-      "Your consultation has been completed. Thank you for visiting.";
-    break;
-
   case "admitted":
     title = "Hospital Admission";
     body =
       "You have been admitted. Please proceed to the assigned ward.";
     break;
+  
+  case "discharged":
+  title = "Hospital Discharge";
+  body =
+    "You have been discharged. We wish you a speedy recovery.";
+  break;
 
   case "transferred":
   title = "Department Transfer";
@@ -6319,14 +6320,26 @@ await savePatientJourney({
 );
 
 await supabaseAdmin
-  .from("hospital_notifications")
-  .insert({
-    hospital_id: booking.hospital_id,
-    patient_id: booking.patient_id,
-    booking_id: booking.id,
-    title,
-    message: body,
-  });
+.from("hospital_notifications")
+.insert({
+
+  hospital_id: booking.hospital_id,
+
+  patient_id: booking.patient_id,
+
+  booking_id: booking.id,
+
+  department_id: booking.department_id,
+
+  title,
+
+  message: body,
+
+  type: status,
+
+  read: false,
+
+});
     }
     
 
@@ -6454,8 +6467,8 @@ notifyNextPatients(
 
 }
 if (
-  status === "completed" ||
   status === "admitted" ||
+   status === "discharged" ||
   status === "transferred" ||
   status === "referred" ||
   status === "cancelled" ||
@@ -10242,25 +10255,90 @@ router.get(
 router.get(
   "/notifications",
   authenticate,
-  hospitalAdminAuth,
   async (req, res) => {
     try {
-      const hospitalId =
-        req.hospitalAdmin.hospital_id;
+      const userId = req.user.id;
 
-      const { data, error } =
-        await supabaseAdmin
-          .from("hospital_notifications")
-          .select(`
-            *,
-            hospital_bookings(
-              queue_number
-            )
-          `)
-          .eq("hospital_id", hospitalId)
-          .order("created_at", {
-            ascending: false,
-          });
+let hospitalId = null;
+let departmentId = null;
+let role = null;
+
+/* Hospital Admin */
+const { data: admin } =
+await supabaseAdmin
+.from("hospital_admins")
+.select("hospital_id")
+.eq("user_id", userId)
+.eq("status","approved")
+.maybeSingle();
+
+if (admin) {
+    hospitalId = admin.hospital_id;
+    role = "hospital_admin";
+}
+
+/* Department Staff */
+if (!hospitalId) {
+
+const { data: staff } =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select(`
+hospital_id,
+department_id
+`)
+.eq("user_id", userId)
+.eq("active", true)
+.eq("status","approved")
+.maybeSingle();
+
+if (!staff) {
+    return res.status(403).json({
+        success:false,
+        error:"Access denied"
+    });
+}
+
+hospitalId = staff.hospital_id;
+departmentId = staff.department_id;
+role = "department_staff";
+
+}
+
+      let query =
+supabaseAdmin
+.from("hospital_notifications")
+.select(`
+*,
+hospital_bookings(
+id,
+department_id,
+queue_number,
+status
+)
+`)
+.eq("hospital_id", hospitalId);
+
+const { data, error } =
+await query.order(
+"created_at",
+{
+ascending:false
+});
+
+let notifications =
+data || [];
+
+if(role==="department_staff"){
+
+notifications =
+notifications.filter(
+n=>
+n.hospital_bookings &&
+n.hospital_bookings.department_id===departmentId
+);
+
+}
 
       if (error) {
         return res.status(400).json({
@@ -10289,13 +10367,57 @@ router.get(
 router.post(
   "/notification-read",
   authenticate,
-  hospitalAdminAuth,
   async (req, res) => {
     try {
 
       const { notification_id } = req.body;
-      const hospitalId =
-  req.hospitalAdmin.hospital_id;
+      const userId = req.user.id;
+
+let hospitalId = null;
+let departmentId = null;
+let role = null;
+
+/* Hospital Admin */
+const { data: admin } =
+await supabaseAdmin
+.from("hospital_admins")
+.select("hospital_id")
+.eq("user_id", userId)
+.eq("status","approved")
+.maybeSingle();
+
+if (admin) {
+    hospitalId = admin.hospital_id;
+    role = "hospital_admin";
+}
+
+/* Department Staff */
+if (!hospitalId) {
+
+const { data: staff } =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select(`
+hospital_id,
+department_id
+`)
+.eq("user_id", userId)
+.eq("active", true)
+.eq("status","approved")
+.maybeSingle();
+
+if (!staff) {
+    return res.status(403).json({
+        success:false,
+        error:"Access denied"
+    });
+}
+
+hospitalId = staff.hospital_id;
+departmentId = staff.department_id;
+role = "department_staff";
+
+}
       if (!notification_id) {
         return res.status(400).json({
           success: false,
@@ -10314,6 +10436,17 @@ const { data, error } =
     .eq("hospital_id", hospitalId)
     .select()
     .single();
+    if(
+role==="department_staff" &&
+data.department_id!==departmentId
+){
+
+return res.status(403).json({
+success:false,
+error:"Access denied"
+});
+
+}
 
       if (error) {
         return res.status(400).json({
