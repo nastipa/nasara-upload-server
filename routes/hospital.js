@@ -1605,56 +1605,90 @@ router.get(
 
 
       /* --------------------------------
-         FIND STAFF HOSPITAL
-      -------------------------------- */
+   CHECK HOSPITAL ADMIN
+-------------------------------- */
 
-      const {
-        data: staff,
-        error: staffError
-      } =
-      await supabaseAdmin
-      .from("hospital_department_staff")
-      .select(`
-        hospital_id
-      `)
-      .eq(
-        "user_id",
-        userId
-      )
-      .eq(
-        "active",
-        true
-      )
-      .maybeSingle();
+const {
+  data: admin,
+  error: adminError,
+} =
+await supabaseAdmin
+.from("hospital_admins")
+.select(`
+  hospital_id
+`)
+.eq(
+  "user_id",
+  userId
+)
+.eq(
+  "status",
+  "approved"
+)
+.maybeSingle();
 
+if (adminError) {
 
+  return res.status(400).json({
+    success:false,
+    error:adminError.message,
+  });
 
-      if (staffError) {
+}
 
-        return res.status(400).json({
-          success:false,
-          error:staffError.message
-        });
+/* --------------------------------
+   CHECK DEPARTMENT STAFF
+-------------------------------- */
 
-      }
+const {
+  data: staff,
+  error: staffError,
+} =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select(`
+  hospital_id
+`)
+.eq(
+  "user_id",
+  userId
+)
+.eq(
+  "active",
+  true
+)
+.eq(
+  "status",
+  "approved"
+)
+.maybeSingle();
 
+if (staffError) {
 
+  return res.status(400).json({
+    success:false,
+    error:staffError.message,
+  });
 
-      if (!staff) {
+}
 
-        return res.status(403).json({
-          success:false,
-          error:
-          "You are not an active hospital staff member."
-        });
+/* --------------------------------
+   ALLOW EITHER ADMIN OR STAFF
+-------------------------------- */
 
-      }
+if (!admin && !staff) {
 
+  return res.status(403).json({
+    success:false,
+    error:"Access denied.",
+  });
 
+}
 
-      const hospitalId =
-        staff.hospital_id;
-
+const hospitalId =
+  admin
+    ? admin.hospital_id
+    : staff.hospital_id;
 
 
       const today =
@@ -3904,45 +3938,110 @@ router.get(
 router.post(
   "/department-dashboard",
   authenticate,
-  departmentStaffAuth,
   async (req, res) => {
 
     try {
 
-      const hospitalId =
-        req.departmentStaff.hospital_id;
+      /* ----------------------------------
+   CHECK HOSPITAL ADMIN
+----------------------------------- */
 
-      const staffDepartmentId =
-        req.departmentStaff.department_id;
+const {
+  data: admin,
+  error: adminError,
+} =
+await supabaseAdmin
+.from("hospital_admins")
+.select(`
+  hospital_id
+`)
+.eq("user_id", req.user.id)
+.eq("status", "approved")
+.maybeSingle();
+
+if (adminError) {
+
+  return res.status(400).json({
+    error: adminError.message,
+  });
+
+}
+
+/* ----------------------------------
+   CHECK DEPARTMENT STAFF
+----------------------------------- */
+
+const {
+  data: staff,
+  error: staffError,
+} =
+await supabaseAdmin
+.from("hospital_department_staff")
+.select(`
+  hospital_id,
+  department_id
+`)
+.eq("user_id", req.user.id)
+.eq("active", true)
+.eq("status", "approved")
+.maybeSingle();
+
+if (staffError) {
+
+  return res.status(400).json({
+    error: staffError.message,
+  });
+
+}
+
+/* ----------------------------------
+   MUST BE ADMIN OR STAFF
+----------------------------------- */
+
+if (!admin && !staff) {
+
+  return res.status(403).json({
+    error: "Access denied.",
+  });
+
+}
+
+const hospitalId =
+  admin
+    ? admin.hospital_id
+    : staff.hospital_id;
+
+/* ----------------------------------
+   Department to open
+----------------------------------- */
 
 const department_id =
-req.departmentStaff.department_id;
+  req.body.department_id ||
+  staff?.department_id;
 
+if (!department_id) {
 
+  return res.status(400).json({
+    error: "department_id is required",
+  });
 
-      if (!department_id) {
+}
 
-        return res.status(400).json({
-          error:
-          "department_id is required",
-        });
+/* ----------------------------------
+   Staff restriction
+----------------------------------- */
 
-      }
+if (
+  !admin &&
+  department_id !== staff.department_id
+) {
 
+  return res.status(403).json({
+    error:
+      "You cannot access another department.",
+  });
 
-      // Staff can only view their own department
-
-      if (
-        department_id !== staffDepartmentId
-      ) {
-
-        return res.status(403).json({
-          error:
-          "You cannot access another department",
-        });
-
-      }
-
+}
 
 
       const {
@@ -4408,6 +4507,151 @@ bookings.find(
       return res.status(500).json({
         error:
         err.message
+      });
+
+    }
+
+  }
+);
+/* =========================================================
+   DELETE HOSPITAL DEPARTMENT
+   HOSPITAL ADMIN ONLY
+========================================================= */
+
+router.delete(
+  "/delete-department/:department_id",
+  authenticate,
+  async (req, res) => {
+
+    try {
+
+      const { department_id } = req.params;
+
+      /* -----------------------------
+         VERIFY HOSPITAL ADMIN
+      ------------------------------ */
+
+      const {
+        data: admin,
+        error: adminError,
+      } = await supabaseAdmin
+        .from("hospital_admins")
+        .select("hospital_id")
+        .eq("user_id", req.user.id)
+        .eq("status", "approved")
+        .maybeSingle();
+
+      if (adminError) {
+        return res.status(400).json({
+          success: false,
+          error: adminError.message,
+        });
+      }
+
+      if (!admin) {
+        return res.status(403).json({
+          success: false,
+          error: "Only hospital administrators can delete departments.",
+        });
+      }
+
+      /* -----------------------------
+         VERIFY DEPARTMENT
+      ------------------------------ */
+
+      const {
+        data: department,
+        error: departmentError,
+      } = await supabaseAdmin
+        .from("hospital_departments")
+        .select("id,hospital_id,name")
+        .eq("id", department_id)
+        .eq("hospital_id", admin.hospital_id)
+        .maybeSingle();
+
+      if (departmentError) {
+        return res.status(400).json({
+          success: false,
+          error: departmentError.message,
+        });
+      }
+
+      if (!department) {
+        return res.status(404).json({
+          success: false,
+          error: "Department not found.",
+        });
+      }
+
+      /* -----------------------------
+         PREVENT DELETE IF BOOKINGS EXIST
+      ------------------------------ */
+
+      const {
+        count: bookingCount,
+        error: bookingError,
+      } = await supabaseAdmin
+        .from("hospital_bookings")
+        .select("*", {
+          count: "exact",
+          head: true,
+        })
+        .eq("department_id", department_id);
+
+      if (bookingError) {
+        return res.status(400).json({
+          success: false,
+          error: bookingError.message,
+        });
+      }
+
+      if ((bookingCount || 0) > 0) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "This department already has patient records or queue history and cannot be deleted.",
+        });
+      }
+
+      /* -----------------------------
+         REMOVE STAFF ASSIGNMENTS
+      ------------------------------ */
+
+      await supabaseAdmin
+        .from("hospital_department_staff")
+        .delete()
+        .eq("department_id", department_id);
+
+      /* -----------------------------
+         DELETE DEPARTMENT
+      ------------------------------ */
+
+      const {
+        error: deleteError,
+      } = await supabaseAdmin
+        .from("hospital_departments")
+        .delete()
+        .eq("id", department_id);
+
+      if (deleteError) {
+        return res.status(400).json({
+          success: false,
+          error: deleteError.message,
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Department deleted successfully.",
+      });
+
+    } catch (err) {
+
+      console.error(err);
+
+      return res.status(500).json({
+        success: false,
+        error: err.message,
       });
 
     }
