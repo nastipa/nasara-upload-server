@@ -978,8 +978,8 @@ const { data: existingBooking } =
     .eq("booking_date", today)
     .in("status", [
       "waiting",
-      "checked_in",
       "called",
+      "consultation",
     ])
     .maybeSingle();
 
@@ -1382,6 +1382,7 @@ return res.status(500).json({
 }
 
 });
+
 
 /* =========================================================
    GET LIVE QUEUE PROGRESS
@@ -8050,58 +8051,29 @@ const staffId =
       ---------------------------------- */
 
       const {
-        data,
-        error,
-      } = await supabaseAdmin
-        .from("hospital_bookings")
-        .update({
+  data,
+  error,
+} = await supabaseAdmin
+  .from("hospital_bookings")
+  .update({
 
-          previous_department_id:
-            booking.department_id,
+    status: "transferred",
 
-          department_id:
-            next_department_id,
+    current_stage: "transferred",
 
-          department:
-            department.name,
+    transferred_at:
+      new Date().toISOString(),
 
-          queue_number:
-            queueNumber,
+    transferred_by:
+      staffId,
 
-          queue_position:
-            (count || 0) + 1,
+    transfer_note:
+      note || null,
 
-          current_stage:
-            "waiting",
-
-          status:
-            "waiting",
-
-          checked_in:
-            false,
-
-          called_at:
-            null,
-
-          arrived_at:
-            null,
-
-          completed_at:
-            null,
-
-          transferred_at:
-            new Date().toISOString(),
-
-          transferred_by:
-            staffId,
-
-          transfer_note:
-            note || null,
-
-        })
-        .eq("id", booking.id)
-        .select()
-        .single();
+  })
+  .eq("id", booking.id)
+  .select()
+  .single();
 
       if (error) {
         return res.status(400).json({
@@ -8109,6 +8081,72 @@ const staffId =
           error: error.message,
         });
       }
+      /* ----------------------------------
+   CREATE NEW BOOKING
+---------------------------------- */
+
+const {
+  data: newBooking,
+  error: newBookingError,
+} = await supabaseAdmin
+  .from("hospital_bookings")
+  .insert({
+
+    hospital_id: hospitalId,
+
+    patient_id: booking.patient_id,
+
+    patient_record_id:
+      booking.patient_record_id,
+
+    department_id:
+      next_department_id,
+
+    department:
+      department.name,
+
+    booking_date:
+      booking.booking_date,
+
+    queue_number:
+      queueNumber,
+
+    queue_position:
+      (count || 0) + 1,
+
+    booking_code:
+      booking.booking_code,
+
+    condition:
+      booking.condition,
+
+    priority:
+      booking.priority,
+
+    priority_level:
+      booking.priority_level,
+
+    checked_in: false,
+
+    current_stage: "waiting",
+
+    status: "waiting",
+
+    estimated_wait_minutes:
+      department.average_minutes || 10,
+
+  })
+  .select()
+  .single();
+
+if (newBookingError) {
+
+  return res.status(400).json({
+    success: false,
+    error: newBookingError.message,
+  });
+
+}
       /* ----------------------------------
          CREATE TRANSFER HISTORY
       ---------------------------------- */
@@ -8193,7 +8231,7 @@ const staffId =
         message:
           "Patient transferred successfully.",
 
-        booking: data,
+        booking: newBooking,
 
       });
 
