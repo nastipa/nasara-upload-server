@@ -2337,8 +2337,9 @@ router.get(
     .eq("booking_date", today)
     .in("status", [
       "waiting",
-      "in_consultation",
       "called",
+      "in_consultation",
+      
     ])
     .order("created_at", {
       ascending: false,
@@ -2372,7 +2373,7 @@ const {data:department}=await supabaseAdmin
 .eq("id",booking.department_id)
 .single();
 
-      // Current serving (prefer CALLED, otherwise CHECKED_IN)
+      // Current serving (prefer in consultation, otherwise called)
 
 let { data: currentServing } =
   await supabaseAdmin
@@ -2381,7 +2382,7 @@ let { data: currentServing } =
     .eq("hospital_id", booking.hospital_id)
     .eq("department_id", booking.department_id)
     .eq("booking_date", today)
-    .eq("status", "called")
+    .eq("status", "in_consultation")
     .order("updated_at", {
       ascending: false,
     })
@@ -2389,23 +2390,21 @@ let { data: currentServing } =
     .maybeSingle();
 
 if (!currentServing) {
-
-  const { data: checkedIn } =
+  const { data: calledPatient } =
     await supabaseAdmin
       .from("hospital_bookings")
       .select("queue_number,status")
       .eq("hospital_id", booking.hospital_id)
       .eq("department_id", booking.department_id)
       .eq("booking_date", today)
-      .eq("status", "in_consultation")
+      .eq("status", "called")
       .order("updated_at", {
         ascending: false,
       })
       .limit(1)
       .maybeSingle();
 
-  currentServing = consultation;
-
+  currentServing = calledPatient;
 }
       // Next patients waiting
 const { data: nextPatients } =
@@ -2451,6 +2450,41 @@ const { count: waitingCount } =
     ])
     .lt("queue_position", booking.queue_position);
 
+    const { data: queueBoard } =
+  await supabaseAdmin
+    .from("hospital_bookings")
+    .select(
+      "queue_number, queue_position, status"
+    )
+    .eq(
+      "hospital_id",
+      booking.hospital_id
+    )
+    .eq(
+      "department_id",
+      booking.department_id
+    )
+    .eq(
+      "booking_date",
+      today
+    )
+    .in("status", [
+      "waiting",
+      "called",
+      "in_consultation",
+    ])
+    .gte(
+      "queue_position",
+      booking.queue_position - 3
+    )
+    .lte(
+      "queue_position",
+      booking.queue_position + 3
+    )
+    .order("queue_position", {
+      ascending: true,
+    });
+
 const estimatedWait =
   (peopleAhead || 0) * 10;
 
@@ -2472,6 +2506,14 @@ const estimatedWait =
       (nextPatients || []).map(
         item => item.queue_number
       ),
+      queue_board:
+  (queueBoard || []).map(item => ({
+    queue_number: item.queue_number,
+    status: item.status,
+    is_you:
+      item.queue_position ===
+      booking.queue_position,
+  })),
 
     total_waiting:
       waitingCount || 0,
