@@ -1030,33 +1030,21 @@ if (depError || !department) {
    COUNT QUEUE NUMBER
 ============================== */
 
-const {
-  count
-} =
+const { data: lastBooking } =
 await supabaseAdmin
   .from("hospital_bookings")
-  .select("*", {
-    count:"exact",
-    head:true
+  .select("queue_position")
+  .eq("hospital_id", hospital_id)
+  .eq("department_id", department_id)
+  .eq("booking_date", bookingDate)
+  .order("queue_position", {
+    ascending: false,
   })
-  .eq(
-    "hospital_id",
-    hospital_id
-  )
-  .eq(
-    "department_id",
-    department_id
-  )
-  .eq(
-    "booking_date",
-    bookingDate
-  );
-
+  .limit(1)
+  .maybeSingle();
 
 const queuePosition =
-  (count || 0) + 1;
-
-
+  (lastBooking?.queue_position || 0) + 1;
 
 const queueNumber =
   `${department.name.substring(0,3).toUpperCase()}-${String(queuePosition).padStart(3,"0")}`;
@@ -10664,7 +10652,7 @@ router.post(
         .in("status",[
           "waiting",
           "called",
-          "checked_in"
+          "consultation"
         ])
         .maybeSingle();
 
@@ -10689,33 +10677,28 @@ router.post(
       ---------------------------------- */
 
 
-      const {
-        count
-      } =
-      await supabaseAdmin
-      .from("hospital_bookings")
-      .select("*",{
-        count:"exact",
-        head:true,
-      })
-      .eq("hospital_id",hospital_id)
-      .eq("department_id",department_id)
-      .eq("booking_date",today);
+      const { data: lastBooking } =
+await supabaseAdmin
+  .from("hospital_bookings")
+  .select("queue_position")
+  .eq("hospital_id", hospital_id)
+  .eq("department_id", department_id)
+  .eq("booking_date", today)
+  .order("queue_position", {
+    ascending: false,
+  })
+  .limit(1)
+  .maybeSingle();
 
+const queuePosition =
+  (lastBooking?.queue_position || 0) + 1;
 
-
-      const queuePosition =
-        (count || 0) + 1;
-
-
-
-      const queueNumber =
-        `${department.name
-          .substring(0,3)
-          .toUpperCase()}-${String(
-            queuePosition
-          ).padStart(3,"0")}`;
-
+const queueNumber =
+  `${department.name
+    .substring(0,3)
+    .toUpperCase()}-${String(
+      queuePosition
+    ).padStart(3,"0")}`;
 
 
 
