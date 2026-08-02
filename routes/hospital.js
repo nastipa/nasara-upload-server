@@ -3025,14 +3025,6 @@ const referred =
     b => b.status === "referred"
   ).length;
 
-const completed =
-  bookings.filter(
-    b =>
-      b.status === "completed" &&
-      b.completed_at &&
-      b.completed_at.startsWith(today)
-  ).length;
-
 const cancelled =
   bookings.filter(
     b => b.status === "cancelled"
