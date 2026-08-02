@@ -10492,7 +10492,6 @@ await supabaseAdmin
   id,
   title,
   message,
-  type,
   read,
   created_at,
 
@@ -10539,7 +10538,6 @@ title:item.title,
 
 message:item.message,
 
-type:item.type,
 
 is_read:item.read,
 
