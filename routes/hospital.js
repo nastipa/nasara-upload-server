@@ -2450,7 +2450,22 @@ const { count: waitingCount } =
     ])
     .lt("queue_position", booking.queue_position);
 
-    const { data: queueBoard } =
+    // Patients around the current patient
+// (3 before + you + 3 after)
+
+const startPosition =
+  Math.max(
+    booking.queue_position - 3,
+    1
+  );
+
+
+const endPosition =
+  booking.queue_position + 3;
+
+
+
+const { data: queueBoard } =
   await supabaseAdmin
     .from("hospital_bookings")
     .select(
@@ -2475,15 +2490,18 @@ const { count: waitingCount } =
     ])
     .gte(
       "queue_position",
-      booking.queue_position - 3
+      startPosition
     )
     .lte(
       "queue_position",
-      booking.queue_position + 3
+      endPosition
     )
-    .order("queue_position", {
-      ascending: true,
-    });
+    .order(
+      "queue_position",
+      {
+        ascending:true,
+      }
+    );
 
 const estimatedWait =
   (peopleAhead || 0) * 10;
