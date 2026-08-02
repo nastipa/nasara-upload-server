@@ -8033,6 +8033,12 @@ const staffId =
       const queueNumber = String(
         (count || 0) + 1
       ).padStart(3, "0");
+      const newBookingCode =
+  "NHS-" +
+  crypto
+    .randomBytes(3)
+    .toString("hex")
+    .toUpperCase();
 
       /* ----------------------------------
          UPDATE BOOKING
@@ -8102,8 +8108,11 @@ const {
     queue_position:
       (count || 0) + 1,
 
-    booking_code:
-      booking.booking_code,
+   booking_code:
+  newBookingCode,
+
+qr_code:
+  newBookingCode,
 
     condition:
       booking.condition,
