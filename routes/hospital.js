@@ -3437,7 +3437,9 @@ return res.json({
     totalPatients,
 
   patients_served_today:
-    completed,
+  discharged +
+  transferred +
+  referred,
 
   waiting,
 
