@@ -2952,7 +2952,6 @@ await supabaseAdmin
     discharged_at,
     transferred_at,
     referred_at,
-    completed_at,
     department_id,
     hospital_departments!hospital_bookings_department_id_fkey(
       id,
@@ -3281,7 +3280,7 @@ admitted: 0,
 discharged: 0,
 transferred: 0,
 referred: 0,
-      completed: 0,
+    
     };
 
   }
@@ -3453,8 +3452,6 @@ discharged,
 transferred,
 
 referred,
-
-  completed,
 
   cancelled,
 
