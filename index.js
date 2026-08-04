@@ -884,6 +884,74 @@ app.post("/create-hub360-user", async (req, res) => {
   }
 
 });
+/* ================= RESET HUB360 USER PASSWORD ================= */
+app.post("/reset-hub360-password", async (req, res) => {
+
+  try {
+
+    const { auth_user_id } = req.body;
+
+    if (!auth_user_id) {
+
+      return res.status(400).json({
+        error: "auth_user_id is required",
+      });
+
+    }
+
+    // Generate temporary password
+
+    const temporaryPassword =
+      "Hub@" +
+      Math.floor(
+        100000 + Math.random() * 900000
+      );
+
+    // Update Supabase Auth password
+
+    const { error } =
+      await supabase.auth.admin.updateUserById(
+        auth_user_id,
+        {
+          password: temporaryPassword,
+        }
+      );
+
+    if (error) {
+
+      return res.status(400).json({
+        error: error.message,
+      });
+
+    }
+
+    // Force password change on next login
+
+    await supabase
+      .from("hub_users")
+      .update({
+        must_change_password: true,
+      })
+      .eq("auth_user_id", auth_user_id);
+
+    return res.json({
+
+      success: true,
+
+      temporary_password:
+        temporaryPassword,
+
+    });
+
+  } catch (err) {
+
+    return res.status(500).json({
+      error: err.message,
+    });
+
+  }
+
+});
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
   try {
