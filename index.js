@@ -682,7 +682,6 @@ const temporaryPassword =
 /* ================= CREATE HUB360 USER ================= */
 app.post("/create-hub360-user", async (req, res) => {
   try {
-
     const {
       email,
       full_name,
@@ -698,6 +697,10 @@ app.post("/create-hub360-user", async (req, res) => {
       Math.random().toString(36).slice(-8) +
       Math.floor(Math.random() * 100);
 
+    // =====================================================
+    // VALIDATION
+    // =====================================================
+
     if (
       !email ||
       !full_name ||
@@ -709,27 +712,119 @@ app.post("/create-hub360-user", async (req, res) => {
       });
     }
 
+    // =====================================================
+    // NORMALIZE ROLE
+    // =====================================================
+
+    const normalizedRole =
+      String(role).trim().toLowerCase();
+
+    // =====================================================
+    // CLASS NAME
+    //
+    // For students, get the selected group's name.
+    //
+    // Example:
+    // group_id -> "JHS 1 A"
+    //
+    // Then save:
+    // hub_users.class_name = "JHS 1 A"
+    // =====================================================
+
+    let className = null;
+
+    if (
+      normalizedRole === "student" &&
+      group_id
+    ) {
+      const {
+        data: group,
+        error: groupError,
+      } = await supabaseAdmin
+        .from("hub_groups")
+        .select(`
+          id,
+          name,
+          institution_id,
+          type,
+          category
+        `)
+        .eq("id", group_id)
+        .eq(
+          "institution_id",
+          institution_id
+        )
+        .maybeSingle();
+
+      if (groupError) {
+        console.log(
+          "GROUP LOOKUP ERROR:",
+          groupError
+        );
+
+        return res.status(400).json({
+          error:
+            "Unable to find selected class: " +
+            groupError.message,
+        });
+      }
+
+      if (!group) {
+        return res.status(400).json({
+          error:
+            "Selected class was not found for this institution.",
+        });
+      }
+
+      className = group.name;
+
+      console.log(
+        "SELECTED STUDENT CLASS:",
+        {
+          group_id,
+          class_name: className,
+        }
+      );
+    }
+
+    // =====================================================
+    // USER ID
+    // =====================================================
+
     let userId;
     let existingUser = false;
 
-    // Create auth user
+    // =====================================================
+    // CREATE AUTH USER
+    // =====================================================
+
     const {
       data: authData,
       error: authError,
     } =
       await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: temporaryPassword,
+        email:
+          email.trim().toLowerCase(),
+
+        password:
+          temporaryPassword,
+
         email_confirm: true,
       });
+
+    // =====================================================
+    // AUTH USER CREATED
+    // =====================================================
 
     if (authData?.user) {
       userId = authData.user.id;
     }
 
-    // User already exists
-    if (authError) {
+    // =====================================================
+    // USER ALREADY EXISTS
+    // =====================================================
 
+    if (authError) {
       const msg =
         authError.message?.toLowerCase() || "";
 
@@ -737,8 +832,11 @@ app.post("/create-hub360-user", async (req, res) => {
         msg.includes("already") ||
         msg.includes("exists")
       ) {
-
         existingUser = true;
+
+        // -----------------------------------------------
+        // FIND EXISTING AUTH USER
+        // -----------------------------------------------
 
         const {
           data,
@@ -759,7 +857,7 @@ app.post("/create-hub360-user", async (req, res) => {
           data.users.find(
             (u) =>
               u.email?.toLowerCase() ===
-              email.toLowerCase()
+              email.trim().toLowerCase()
           );
 
         if (!found) {
@@ -768,121 +866,244 @@ app.post("/create-hub360-user", async (req, res) => {
               "User exists but cannot be located",
           });
         }
-        
+
         userId = found.id;
 
-        // Reset temporary password
-        await supabaseAdmin.auth.admin.updateUserById(
-          userId,
-          {
-            password: temporaryPassword,
-          }
-        );
+        // -----------------------------------------------
+        // RESET TEMPORARY PASSWORD
+        // -----------------------------------------------
+
+        const {
+          error: passwordError,
+        } =
+          await supabaseAdmin.auth.admin.updateUserById(
+            userId,
+            {
+              password:
+                temporaryPassword,
+            }
+          );
+
+        if (passwordError) {
+          return res.status(400).json({
+            error:
+              passwordError.message,
+          });
+        }
 
       } else {
-
         return res.status(400).json({
           error: authError.message,
         });
-
       }
-
     }
 
-    // Check if profile already exists
+    // =====================================================
+    // SAFETY CHECK
+    // =====================================================
+
+    if (!userId) {
+      return res.status(400).json({
+        error:
+          "Unable to determine user ID.",
+      });
+    }
+
+    // =====================================================
+    // CHECK IF HUB USER PROFILE EXISTS
+    // =====================================================
+
     const {
       data: existingProfile,
+      error: profileCheckError,
     } =
       await supabaseAdmin
         .from("hub_users")
         .select("id")
-        .eq("auth_user_id", userId)
+        .eq(
+          "auth_user_id",
+          userId
+        )
         .maybeSingle();
 
-    if (existingProfile) {
+    if (profileCheckError) {
+      return res.status(400).json({
+        error:
+          profileCheckError.message,
+      });
+    }
 
-      // Update existing profile
-      const { error: updateError } =
+    // =====================================================
+    // PROFILE DATA
+    // =====================================================
+
+    const profileData = {
+      full_name:
+        full_name.trim(),
+
+      email:
+        email.trim().toLowerCase(),
+
+      role:
+        role.trim(),
+
+      institution_id,
+
+      phone:
+        phone?.trim() || null,
+
+      employee_or_student_id:
+        employee_or_student_id?.trim() || null,
+
+      department_id:
+        department_id || null,
+
+      // -----------------------------------------------
+      // STUDENT GROUP
+      // -----------------------------------------------
+
+      group_id:
+        normalizedRole === "student"
+          ? group_id || null
+          : null,
+
+      // -----------------------------------------------
+      // STUDENT CLASS NAME
+      //
+      // This is the important addition.
+      // -----------------------------------------------
+
+      class_name:
+        normalizedRole === "student"
+          ? className
+          : null,
+
+      active: true,
+
+      password_changed: false,
+    };
+
+    // =====================================================
+    // UPDATE EXISTING HUB USER
+    // =====================================================
+
+    if (existingProfile) {
+      console.log(
+        "UPDATING EXISTING HUB USER:",
+        existingProfile.id
+      );
+
+      const {
+        error: updateError,
+      } =
         await supabaseAdmin
           .from("hub_users")
-          .update({
-            full_name,
-            email,
-            role,
-            institution_id,
-            phone: phone || null,
-            employee_or_student_id:
-              employee_or_student_id || null,
-            department_id:
-              department_id || null,
-            group_id:
-              role === "student"
-                ? group_id
-                : null,
-            active: true,
-            password_changed: false,
-          })
-          .eq("id", existingProfile.id);
+          .update(profileData)
+          .eq(
+            "id",
+            existingProfile.id
+          );
 
       if (updateError) {
         return res.status(400).json({
-          error: updateError.message,
+          error:
+            updateError.message,
         });
       }
 
     } else {
 
-      // Insert new profile
-      const { error: insertError } =
+      // ===================================================
+      // CREATE NEW HUB USER
+      // ===================================================
+
+      console.log(
+        "CREATING NEW HUB USER"
+      );
+
+      const {
+        error: insertError,
+      } =
         await supabaseAdmin
           .from("hub_users")
           .insert({
-            auth_user_id: userId,
-            email,
-            full_name,
-            role,
-            institution_id,
-            phone: phone || null,
-            employee_or_student_id:
-              employee_or_student_id || null,
-            department_id:
-              department_id || null,
-            group_id:
-              role === "student"
-                ? group_id
-                : null,
-            active: true,
-            password_changed: false,
+            auth_user_id:
+              userId,
+
+            ...profileData,
           });
 
       if (insertError) {
         return res.status(400).json({
-          error: insertError.message,
+          error:
+            insertError.message,
         });
       }
-
     }
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
+
+    console.log(
+      "HUB360 USER CREATED:",
+      {
+        user_id: userId,
+        email,
+        role,
+        group_id:
+          normalizedRole === "student"
+            ? group_id
+            : null,
+        class_name:
+          normalizedRole === "student"
+            ? className
+            : null,
+      }
+    );
 
     return res.json({
       success: true,
-      user_id: userId,
-      email,
+
+      user_id:
+        userId,
+
+      email:
+        email.trim().toLowerCase(),
+
+      role:
+        role.trim(),
+
+      group_id:
+        normalizedRole === "student"
+          ? group_id || null
+          : null,
+
+      class_name:
+        normalizedRole === "student"
+          ? className
+          : null,
+
       temporary_password:
         temporaryPassword,
+
       existing_user:
         existingUser,
     });
 
   } catch (err) {
 
-    console.log(err);
+    console.log(
+      "CREATE HUB360 USER ERROR:",
+      err
+    );
 
     return res.status(500).json({
-      error: err.message,
+      error:
+        err?.message ||
+        "Internal server error",
     });
-
   }
-
 });
 /* ================= RESET HUB360 USER PASSWORD ================= */
 app.post("/reset-hub360-password", async (req, res) => {
