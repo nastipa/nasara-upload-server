@@ -10085,21 +10085,29 @@ router.get(
 
   }
 );
-
 /* =========================================================
    GET NEAREST EMERGENCY HOSPITALS
-   Patient current GPS → nearest emergency hospitals
+   Patient current GPS
+        ↓
+   Calculate distance to every hospital GPS
+        ↓
+   Sort nearest → farthest
 ========================================================= */
 router.get(
   "/emergency-hospitals",
   async (req, res) => {
     try {
+      /*
+       * =====================================================
+       * 1. GET PATIENT CURRENT LOCATION
+       * =====================================================
+       */
       const latitude =
         Number(req.query.latitude);
       const longitude =
         Number(req.query.longitude);
       /*
-       * CURRENT PATIENT LOCATION IS REQUIRED
+       * Patient location is required.
        */
       if (
         !Number.isFinite(latitude) ||
@@ -10116,54 +10124,119 @@ router.get(
         });
       }
       /*
-       * GET ACTIVE EMERGENCY HOSPITALS
+       * =====================================================
+       * 2. GET ACTIVE EMERGENCY HOSPITALS
+       * =====================================================
+       *
+       * IMPORTANT:
+       *
+       * latitude/longitude here belong to the HOSPITAL.
+       *
+       * They must NOT be the administrator's location.
+       *
+       * Each hospital must have its own coordinates.
        */
       const {
         data,
         error,
-      } =
-        await supabaseAdmin
-          .from("hospitals")
-          .select(`
-            id,
-            name,
-            phone,
-            address,
-            city,
-            district,
-            region,
-            latitude,
-            longitude,
-            has_emergency
-          `)
+      } = await supabaseAdmin
+        .from("hospitals")
+        .select(`
+          id,
+          name,
+          phone,
+          address,
+          city,
+          district,
+          region,
+          latitude,
+          longitude,
+          has_emergency,
+          is_active
+        `)
+        .eq(
+          "is_active",
+          true
+           )
           .eq(
-            "is_active",
-            true
-          )
-          .eq(
-            "has_emergency",
-            true
-          );
+          "status",
+          "active"
+        )
+        .eq(
+          "has_emergency",
+          true
+        );
       if (error) {
+        console.log(
+          "Emergency hospitals database error:",
+          error
+        );
         return res.status(400).json({
           success: false,
           error: error.message,
         });
       }
       /*
-       * HAVERSINE DISTANCE
+       * =====================================================
+       * 3. HAVERSINE DISTANCE FUNCTION
+       * =====================================================
        *
-       * Patient current GPS
-       *          ↓
-       * Each hospital GPS
+       * Calculates straight-line distance between:
+       *
+       * Patient GPS
+       *      ↓
+       * Hospital GPS
+       *
+       * Result is in kilometres.
        */
-      const toRadians =
-        (value) =>
-          value *
+      const toRadians = (value) => {
+        return value *
           (Math.PI / 180);
+      };
+      const calculateDistanceKm = (
+        patientLat,
+        patientLng,
+        hospitalLat,
+        hospitalLng
+      ) => {
+        const R = 6371;
+        const dLat =
+          toRadians(
+            hospitalLat -
+            patientLat
+          );
+        const dLng =
+          toRadians(
+            hospitalLng -
+            patientLng
+          );
+        const a =
+          Math.sin(dLat / 2) *
+            Math.sin(dLat / 2) +
+          Math.cos(
+            toRadians(patientLat)
+          ) *
+          Math.cos(
+            toRadians(hospitalLat)
+          ) *
+          Math.sin(dLng / 2) *
+            Math.sin(dLng / 2);
+        const c =
+          2 *
+          Math.atan2(
+            Math.sqrt(a),
+            Math.sqrt(1 - a)
+          );
+        return R * c;
+      };
+      /*
+       * =====================================================
+       * 4. CALCULATE DISTANCE FOR EVERY HOSPITAL
+       * =====================================================
+       */
       const hospitals =
-        (data || [])
-          .map((hospital) => {
+        (data || []).map(
+          (hospital) => {
             const hospitalLat =
               Number(
                 hospital.latitude
@@ -10173,8 +10246,10 @@ router.get(
                 hospital.longitude
               );
             /*
-             * Hospital without GPS
-             * cannot be accurately ranked.
+             * Hospital has no valid GPS.
+             *
+             * Keep it in the response, but do not
+             * give it a fake distance.
              */
             if (
               !Number.isFinite(
@@ -10182,86 +10257,107 @@ router.get(
               ) ||
               !Number.isFinite(
                 hospitalLng
-              )
+              ) ||
+              hospitalLat < -90 ||
+              hospitalLat > 90 ||
+              hospitalLng < -180 ||
+              hospitalLng > 180
             ) {
               return {
                 ...hospital,
                 distance_km: null,
               };
             }
-            const R = 6371;
-            const dLat =
-              toRadians(
-                hospitalLat -
-                latitude
-              );
-            const dLng =
-              toRadians(
-                hospitalLng -
-                longitude
-              );
-            const a =
-              Math.sin(dLat / 2) *
-                Math.sin(dLat / 2) +
-              Math.cos(
-                toRadians(latitude)
-              ) *
-              Math.cos(
-                toRadians(hospitalLat)
-              ) *
-              Math.sin(dLng / 2) *
-                Math.sin(dLng / 2);
-            const c =
-              2 *
-              Math.atan2(
-                Math.sqrt(a),
-                Math.sqrt(1 - a)
-              );
+            /*
+             * Calculate:
+             *
+             * PATIENT CURRENT LOCATION
+             *          ↓
+             *     HOSPITAL LOCATION
+             */
             const distance =
-              Number(
-                (
-                  R * c
-                ).toFixed(2)
+              calculateDistanceKm(
+                latitude,
+                longitude,
+                hospitalLat,
+                hospitalLng
               );
             return {
               ...hospital,
+              /*
+               * Round to 2 decimal places.
+               */
               distance_km:
-                distance,
+                Number(
+                  distance.toFixed(2)
+                ),
             };
-          });
+          }
+        );
       /*
-       * SORT:
+       * =====================================================
+       * 5. SORT NEAREST → FARTHEST
+       * =====================================================
        *
-       * NEAREST HOSPITAL FIRST
-       * FARTHEST HOSPITAL LAST
+       * Hospitals with valid GPS appear first.
        *
-       * Hospitals without GPS
-       * go to the bottom.
+       * Hospitals without GPS appear at the bottom.
        */
       hospitals.sort(
         (a, b) => {
+          /*
+           * Both have no distance.
+           */
+          if (
+            a.distance_km === null &&
+            b.distance_km === null
+          ) {
+            return 0;
+          }
+          /*
+           * A has no GPS.
+           */
           if (
             a.distance_km === null
           ) {
             return 1;
           }
+          /*
+           * B has no GPS.
+           */
           if (
             b.distance_km === null
           ) {
             return -1;
           }
+          /*
+           * Nearest first.
+           */
           return (
             a.distance_km -
             b.distance_km
           );
         }
       );
+      /*
+       * =====================================================
+       * 6. RESPONSE
+       * =====================================================
+       */
       return res.json({
         success: true,
+        /*
+         * Send the exact patient GPS used
+         * for this calculation.
+         */
         patient_location: {
           latitude,
           longitude,
         },
+        /*
+         * Hospitals are already sorted
+         * nearest → farthest.
+         */
         hospitals,
       });
     } catch (err) {
