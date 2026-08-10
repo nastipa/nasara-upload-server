@@ -10088,22 +10088,40 @@ router.get(
 
 /* =========================================================
    GET NEAREST EMERGENCY HOSPITALS
+   Patient current GPS → nearest emergency hospitals
 ========================================================= */
-
 router.get(
   "/emergency-hospitals",
   async (req, res) => {
     try {
-
+      const latitude =
+        Number(req.query.latitude);
+      const longitude =
+        Number(req.query.longitude);
+      /*
+       * CURRENT PATIENT LOCATION IS REQUIRED
+       */
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Valid patient current location is required.",
+        });
+      }
+      /*
+       * GET ACTIVE EMERGENCY HOSPITALS
+       */
       const {
-        latitude,
-        longitude,
-      } = req.query;
-
-      const userLat = Number(latitude);
-      const userLng = Number(longitude);
-
-      const { data, error } =
+        data,
+        error,
+      } =
         await supabaseAdmin
           .from("hospitals")
           .select(`
@@ -10118,126 +10136,148 @@ router.get(
             longitude,
             has_emergency
           `)
-          .eq("is_active", true)
-          .eq("has_emergency", true);
-
+          .eq(
+            "is_active",
+            true
+          )
+          .eq(
+            "has_emergency",
+            true
+          );
       if (error) {
         return res.status(400).json({
           success: false,
           error: error.message,
         });
       }
-
-      // If GPS wasn't provided,
-      // return hospitals normally.
-      if (
-        isNaN(userLat) ||
-        isNaN(userLng)
-      ) {
-        return res.json({
-          success: true,
-          hospitals: data || [],
-        });
-      }
-
-      const toRadians = value =>
-        value * (Math.PI / 180);
-
+      /*
+       * HAVERSINE DISTANCE
+       *
+       * Patient current GPS
+       *          ↓
+       * Each hospital GPS
+       */
+      const toRadians =
+        (value) =>
+          value *
+          (Math.PI / 180);
       const hospitals =
-        (data || []).map(hospital => {
-
-          const lat =
-            Number(hospital.latitude);
-
-          const lng =
-            Number(hospital.longitude);
-
-          let distance = null;
-
-          if (
-            !isNaN(lat) &&
-            !isNaN(lng)
-          ) {
-
+        (data || [])
+          .map((hospital) => {
+            const hospitalLat =
+              Number(
+                hospital.latitude
+              );
+            const hospitalLng =
+              Number(
+                hospital.longitude
+              );
+            /*
+             * Hospital without GPS
+             * cannot be accurately ranked.
+             */
+            if (
+              !Number.isFinite(
+                hospitalLat
+              ) ||
+              !Number.isFinite(
+                hospitalLng
+              )
+            ) {
+              return {
+                ...hospital,
+                distance_km: null,
+              };
+            }
             const R = 6371;
-
             const dLat =
               toRadians(
-                lat - userLat
+                hospitalLat -
+                latitude
               );
-
             const dLng =
               toRadians(
-                lng - userLng
+                hospitalLng -
+                longitude
               );
-
             const a =
               Math.sin(dLat / 2) *
                 Math.sin(dLat / 2) +
               Math.cos(
-                toRadians(userLat)
+                toRadians(latitude)
               ) *
-                Math.cos(
-                  toRadians(lat)
-                ) *
-                Math.sin(dLng / 2) *
+              Math.cos(
+                toRadians(hospitalLat)
+              ) *
+              Math.sin(dLng / 2) *
                 Math.sin(dLng / 2);
-
             const c =
               2 *
               Math.atan2(
                 Math.sqrt(a),
                 Math.sqrt(1 - a)
               );
-
-            distance =
+            const distance =
               Number(
-                (R * c).toFixed(2)
+                (
+                  R * c
+                ).toFixed(2)
               );
-
+            return {
+              ...hospital,
+              distance_km:
+                distance,
+            };
+          });
+      /*
+       * SORT:
+       *
+       * NEAREST HOSPITAL FIRST
+       * FARTHEST HOSPITAL LAST
+       *
+       * Hospitals without GPS
+       * go to the bottom.
+       */
+      hospitals.sort(
+        (a, b) => {
+          if (
+            a.distance_km === null
+          ) {
+            return 1;
           }
-
-          return {
-            ...hospital,
-            distance_km: distance,
-          };
-
-        });
-
-      hospitals.sort((a, b) => {
-
-        if (a.distance_km == null)
-          return 1;
-
-        if (b.distance_km == null)
-          return -1;
-
-        return (
-          a.distance_km -
-          b.distance_km
-        );
-
-      });
-
+          if (
+            b.distance_km === null
+          ) {
+            return -1;
+          }
+          return (
+            a.distance_km -
+            b.distance_km
+          );
+        }
+      );
       return res.json({
         success: true,
+        patient_location: {
+          latitude,
+          longitude,
+        },
         hospitals,
       });
-
     } catch (err) {
-
-      console.log(err);
-
+      console.log(
+        "Emergency hospitals error:",
+        err
+      );
       return res.status(500).json({
         success: false,
-        error: err.message,
+        error:
+          err.message ||
+          "Unable to find emergency hospitals.",
       });
-
     }
   }
 );
-
-
 /* =========================================================
    GET HOSPITAL NOTIFICATIONS
 ========================================================= */
