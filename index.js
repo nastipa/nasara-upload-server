@@ -1106,72 +1106,120 @@ app.post("/create-hub360-user", async (req, res) => {
   }
 });
 /* ================= RESET HUB360 USER PASSWORD ================= */
+
 app.post("/reset-hub360-password", async (req, res) => {
-
   try {
-
     const { auth_user_id } = req.body;
 
     if (!auth_user_id) {
-
       return res.status(400).json({
+        success: false,
         error: "auth_user_id is required",
       });
-
     }
 
-    // Generate temporary password
+    console.log(
+      "RESET HUB360 PASSWORD FOR:",
+      auth_user_id
+    );
 
+    // Generate temporary password
     const temporaryPassword =
       "Hub@" +
       Math.floor(
         100000 + Math.random() * 900000
       );
 
-    // Update Supabase Auth password
+    // =====================================================
+    // UPDATE SUPABASE AUTH
+    // IMPORTANT:
+    // Use supabaseAdmin, NOT supabase
+    // =====================================================
 
-    const { error } =
-      await supabase.auth.admin.updateUserById(
+    const { data: updatedUser, error: authError } =
+      await supabaseAdmin.auth.admin.updateUserById(
         auth_user_id,
         {
           password: temporaryPassword,
         }
       );
 
-    if (error) {
+    if (authError) {
+      console.log(
+        "SUPABASE AUTH PASSWORD RESET ERROR:",
+        authError
+      );
 
       return res.status(400).json({
-        error: error.message,
+        success: false,
+        error: authError.message,
       });
-
     }
 
-    // Force password change on next login
+    if (!updatedUser?.user) {
+      return res.status(400).json({
+        success: false,
+        error: "Supabase did not return the updated user.",
+      });
+    }
 
-    await supabase
-      .from("hub_users")
-      .update({
-        must_change_password: true,
-      })
-      .eq("auth_user_id", auth_user_id);
+    // =====================================================
+    // FORCE PASSWORD CHANGE
+    // =====================================================
 
-    return res.json({
+    const { error: hubUserError } =
+      await supabaseAdmin
+        .from("hub_users")
+        .update({
+          must_change_password: true,
+        })
+        .eq(
+          "auth_user_id",
+          auth_user_id
+        );
 
+    if (hubUserError) {
+      console.log(
+        "HUB USER UPDATE ERROR:",
+        hubUserError
+      );
+
+      return res.status(400).json({
+        success: false,
+        error:
+          "Password was reset, but failed to set must_change_password: " +
+          hubUserError.message,
+      });
+    }
+
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    console.log(
+      "HUB360 PASSWORD RESET SUCCESS:",
+      auth_user_id
+    );
+
+    return res.status(200).json({
       success: true,
-
       temporary_password:
         temporaryPassword,
-
     });
 
   } catch (err) {
+    console.log(
+      "RESET HUB360 PASSWORD SERVER ERROR:",
+      err
+    );
 
     return res.status(500).json({
-      error: err.message,
+      success: false,
+      error:
+        err?.message ||
+        "Internal server error",
     });
-
   }
-
 });
 /* ================= REMOVE ADMIN ================= */
 app.post("/remove-admin", async (req, res) => {
