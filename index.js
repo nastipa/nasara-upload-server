@@ -689,8 +689,9 @@ app.post("/create-hub360-user", async (req, res) => {
       institution_id,
       group_id,
       phone,
-      employee_or_student_id,
-      department_id,
+     employee_or_student_id,
+department_id,
+role_id,
     } = req.body;
 
     const temporaryPassword =
@@ -957,7 +958,9 @@ app.post("/create-hub360-user", async (req, res) => {
 
       department_id:
         department_id || null,
-
+         
+        role_id:
+      role_id || null,
       // -----------------------------------------------
       // STUDENT GROUP
       // -----------------------------------------------
