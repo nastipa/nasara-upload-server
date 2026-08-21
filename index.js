@@ -565,120 +565,260 @@ app.post("/create-hub360-admin", async (req, res) => {
       email,
       full_name,
     } = req.body;
-const temporaryPassword =
-  Math.random().toString(36).slice(-8) +
-  Math.floor(Math.random() * 100);
+
+    // ==================================================
+    // VALIDATION
+    // ==================================================
+
     if (!email || !full_name) {
       return res.status(400).json({
-        error: "Missing required fields",
+        error: "Email and full name are required",
       });
     }
 
-    let userId;
-    let existingUser = false;
+    const normalizedEmail =
+      email.trim().toLowerCase();
 
-    // Create auth user
-    const { data: authData, error: authError } =
-     await supabaseAdmin.auth.admin.createUser({
-  email,
-  password: temporaryPassword,
-  email_confirm: true,
-});
-    if (authData?.user) {
-      userId = authData.user.id;
+    const normalizedName =
+      full_name.trim();
+
+    if (!normalizedEmail || !normalizedName) {
+      return res.status(400).json({
+        error: "Email and full name are required",
+      });
     }
 
-    // User already exists
-    if (authError) {
-      const msg = authError.message?.toLowerCase() || "";
+    // ==================================================
+    // GENERATE TEMPORARY PASSWORD
+    // ==================================================
 
-      if (
-        msg.includes("already") ||
-        msg.includes("exists")
-      ) {
-        existingUser = true;
+    const temporaryPassword =
+      Math.random()
+        .toString(36)
+        .slice(-8) +
+      Math.floor(
+        1000 + Math.random() * 9000
+      );
 
-        const { data, error } =
-          await supabaseAdmin.auth.admin.listUsers({
-            page: 1,
-            perPage: 1000,
-          });
+    let userId = null;
+    let existingUser = false;
 
-        if (error) {
-          return res.status(400).json({
-            error: error.message,
-          });
-        }
+    // ==================================================
+    // CHECK IF AUTH USER ALREADY EXISTS
+    // ==================================================
 
-        const found = data.users.find(
-          (u) =>
-            u.email?.toLowerCase() ===
-            email.toLowerCase()
+    const {
+      data: usersData,
+      error: usersError,
+    } =
+      await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+    if (usersError) {
+      return res.status(400).json({
+        error:
+          "Unable to check existing users: " +
+          usersError.message,
+      });
+    }
+
+    const existingAuthUser =
+      usersData.users.find(
+        (user) =>
+          user.email?.toLowerCase() ===
+          normalizedEmail
+      );
+
+    // ==================================================
+    // EXISTING AUTH USER
+    // ==================================================
+
+    if (existingAuthUser) {
+      existingUser = true;
+
+      userId = existingAuthUser.id;
+
+      // ------------------------------------------------
+      // IMPORTANT:
+      // Reset the existing user's password to the newly
+      // generated temporary password.
+      // ------------------------------------------------
+
+      const {
+        error: updatePasswordError,
+      } =
+        await supabaseAdmin.auth.admin.updateUserById(
+          userId,
+          {
+            password:
+              temporaryPassword,
+          }
         );
 
-        if (!found) {
-          return res.status(400).json({
-            error: "User exists but cannot be located",
-          });
-        }
-
-        userId = found.id;
-      } else {
+      if (updatePasswordError) {
         return res.status(400).json({
-          error: authError.message,
+          error:
+            "Unable to set temporary password: " +
+            updatePasswordError.message,
         });
       }
     }
 
-    // Check existing admin profile
-    const { data: existingAdmin } =
+    // ==================================================
+    // CREATE NEW AUTH USER
+    // ==================================================
+
+    if (!userId) {
+      const {
+        data: authData,
+        error: authError,
+      } =
+        await supabaseAdmin.auth.admin.createUser({
+          email: normalizedEmail,
+
+          password:
+            temporaryPassword,
+
+          email_confirm: true,
+        });
+
+      if (authError) {
+        return res.status(400).json({
+          error:
+            authError.message,
+        });
+      }
+
+      if (!authData?.user) {
+        return res.status(400).json({
+          error:
+            "Auth user could not be created.",
+        });
+      }
+
+      userId =
+        authData.user.id;
+    }
+
+    // ==================================================
+    // CHECK IF ALREADY HUB360 ADMIN
+    // ==================================================
+
+    const {
+      data: existingAdmin,
+      error: existingAdminError,
+    } =
       await supabaseAdmin
         .from("hub360_admins")
-        .select("id")
-        .eq("auth_user_id", userId)
+        .select("id, role")
+        .eq(
+          "auth_user_id",
+          userId
+        )
         .maybeSingle();
+
+    if (existingAdminError) {
+      return res.status(400).json({
+        error:
+          existingAdminError.message,
+      });
+    }
 
     if (existingAdmin) {
       return res.status(400).json({
-        error: "User is already a Hub360 admin",
+        error:
+          "This user is already a Hub360 admin.",
       });
     }
 
-    // Insert Institution Admin
-    const { error: insertError } =
+    // ==================================================
+    // CREATE INSTITUTION ADMIN PROFILE
+    // ==================================================
+
+    const {
+      data: admin,
+      error: insertError,
+    } =
       await supabaseAdmin
         .from("hub360_admins")
         .insert({
-          auth_user_id: userId,
-          full_name,
-          email,
-          role: "institution_admin",
-          must_change_password: true,
-          institution_id: null,
-        });
+          auth_user_id:
+            userId,
+
+          full_name:
+            normalizedName,
+
+          email:
+            normalizedEmail,
+
+          role:
+            "institution_admin",
+
+          must_change_password:
+            true,
+
+          institution_id:
+            null,
+        })
+        .select()
+        .single();
 
     if (insertError) {
       return res.status(400).json({
-        error: insertError.message,
+        error:
+          insertError.message,
       });
     }
 
+    // ==================================================
+    // SUCCESS
+    // ==================================================
+
     return res.json({
       success: true,
-        user_id: userId,
-       temporary_password: temporaryPassword,
-      existing_user: existingUser,
+
+      user_id:
+        userId,
+
+      admin_id:
+        admin.id,
+
+      full_name:
+        normalizedName,
+
+      email:
+        normalizedEmail,
+
+      role:
+        "institution_admin",
+
+      existing_user:
+        existingUser,
+
+      temporary_password:
+        temporaryPassword,
+
+      message:
+        existingUser
+          ? "Existing Auth user has been promoted to Institution Admin and assigned a new temporary password."
+          : "Institution Admin account created successfully with a temporary password.",
     });
 
   } catch (err) {
-    console.log(err);
+    console.error(
+      "CREATE HUB360 ADMIN ERROR:",
+      err
+    );
 
     return res.status(500).json({
-      error: err.message,
+      error:
+        err?.message ||
+        "Internal server error",
     });
   }
 });
-
 /* ================= CREATE HUB360 USER ================= */
 app.post("/create-hub360-user", async (req, res) => {
   try {
