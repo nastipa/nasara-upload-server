@@ -313,6 +313,516 @@ app.post("/create-admin", async (req, res) => {
     });
   }
 });
+
+/* ================= CREATE RESTAURANT OWNER ================= */
+
+app.post("/create-restaurant-owner", async (req, res) => {
+  try {
+    const {
+      email,
+      full_name,
+      phone,
+      password,
+    } = req.body;
+
+    // =====================================================
+    // VALIDATION
+    // =====================================================
+
+    if (!email || !full_name) {
+      return res.status(400).json({
+        success: false,
+        error: "Email and full name are required",
+      });
+    }
+
+    const normalizedEmail =
+      String(email).trim().toLowerCase();
+
+    const normalizedName =
+      String(full_name).trim();
+
+    const normalizedPhone =
+      phone
+        ? String(phone).trim()
+        : null;
+
+    if (!normalizedEmail || !normalizedName) {
+      return res.status(400).json({
+        success: false,
+        error: "Email and full name are required",
+      });
+    }
+
+    // =====================================================
+    // PASSWORD
+    //
+    // Existing Nasara users do NOT need a new password.
+    //
+    // New users need a password supplied by admin.
+    // =====================================================
+
+    let newUserPassword = password
+      ? String(password)
+      : null;
+
+    if (
+      newUserPassword &&
+      newUserPassword.length < 6
+    ) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Password must be at least 6 characters",
+      });
+    }
+
+    // =====================================================
+    // FIND EXISTING NASARA AUTH USER
+    //
+    // We use listUsers because the Supabase admin API
+    // does not provide a reliable getUserByEmail method
+    // across all versions.
+    // =====================================================
+
+    const {
+      data: usersData,
+      error: usersError,
+    } =
+      await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+    if (usersError) {
+      console.error(
+        "RESTAURANT OWNER USER LOOKUP ERROR:",
+        usersError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Unable to check existing Nasara users: " +
+          usersError.message,
+      });
+    }
+
+    const existingAuthUser =
+      usersData?.users?.find(
+        (user) =>
+          user.email?.toLowerCase() ===
+          normalizedEmail
+      );
+
+    let userId = null;
+    let existingUser = false;
+    let createdUser = false;
+
+    // =====================================================
+    // EXISTING NASARA USER
+    // =====================================================
+
+    if (existingAuthUser) {
+      existingUser = true;
+
+      userId = existingAuthUser.id;
+
+      console.log(
+        "EXISTING NASARA USER FOUND:",
+        userId
+      );
+
+    } else {
+
+      // ===================================================
+      // NEW NASARA USER
+      // ===================================================
+
+      if (!newUserPassword) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Password is required when creating a new Nasara user.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } =
+        await supabaseAdmin.auth.admin.createUser({
+          email:
+            normalizedEmail,
+
+          password:
+            newUserPassword,
+
+          email_confirm:
+            true,
+
+          user_metadata: {
+            full_name:
+              normalizedName,
+          },
+        });
+
+      if (authError) {
+        console.error(
+          "CREATE RESTAURANT OWNER AUTH ERROR:",
+          authError
+        );
+
+        return res.status(400).json({
+          success: false,
+          error:
+            authError.message,
+        });
+      }
+
+      if (!authData?.user) {
+        return res.status(500).json({
+          success: false,
+          error:
+            "Nasara Auth user was not created.",
+        });
+      }
+
+      userId =
+        authData.user.id;
+
+      createdUser = true;
+
+      console.log(
+        "NEW NASARA USER CREATED:",
+        userId
+      );
+    }
+
+    // =====================================================
+    // SAFETY CHECK
+    // =====================================================
+
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        error:
+          "Unable to determine Nasara user ID.",
+      });
+    }
+
+    // =====================================================
+    // ENSURE NASARA PROFILE EXISTS
+    //
+    // Your actual table is public.profiles.
+    // profiles.id = auth.users.id
+    // =====================================================
+
+    const {
+      data: existingProfile,
+      error: profileCheckError,
+    } =
+      await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, phone")
+        .eq("id", userId)
+        .maybeSingle();
+
+    if (profileCheckError) {
+      console.error(
+        "PROFILE CHECK ERROR:",
+        profileCheckError
+      );
+
+      // If we created the Auth user but cannot continue,
+      // clean it up.
+      if (createdUser) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          userId
+        );
+      }
+
+      return res.status(500).json({
+        success: false,
+        error:
+          profileCheckError.message,
+      });
+    }
+
+    // =====================================================
+    // CREATE OR UPDATE NASARA PROFILE
+    // =====================================================
+
+    if (existingProfile) {
+
+      const profileUpdate = {
+        full_name:
+          normalizedName,
+      };
+
+      if (normalizedPhone) {
+        profileUpdate.phone =
+          normalizedPhone;
+      }
+
+      const {
+        error: profileUpdateError,
+      } =
+        await supabaseAdmin
+          .from("profiles")
+          .update(profileUpdate)
+          .eq("id", userId);
+
+      if (profileUpdateError) {
+        console.error(
+          "PROFILE UPDATE ERROR:",
+          profileUpdateError
+        );
+
+        if (createdUser) {
+          await supabaseAdmin.auth.admin.deleteUser(
+            userId
+          );
+        }
+
+        return res.status(500).json({
+          success: false,
+          error:
+            profileUpdateError.message,
+        });
+      }
+
+    } else {
+
+      const profileInsert = {
+        id:
+          userId,
+
+        full_name:
+          normalizedName,
+
+        phone:
+          normalizedPhone,
+      };
+
+      const {
+        error: profileInsertError,
+      } =
+        await supabaseAdmin
+          .from("profiles")
+          .insert(profileInsert);
+
+      if (profileInsertError) {
+        console.error(
+          "PROFILE INSERT ERROR:",
+          profileInsertError
+        );
+
+        if (createdUser) {
+          await supabaseAdmin.auth.admin.deleteUser(
+            userId
+          );
+        }
+
+        return res.status(500).json({
+          success: false,
+          error:
+            profileInsertError.message,
+        });
+      }
+    }
+
+    // =====================================================
+    // CHECK EXISTING RESTAURANT OWNER ACCESS
+    // =====================================================
+
+    const {
+      data: existingRestaurantOwner,
+      error:
+        restaurantOwnerCheckError,
+    } =
+      await supabaseAdmin
+        .from("restaurant_owners")
+        .select(`
+          id,
+          user_id,
+          restaurant_id,
+          status
+        `)
+        .eq(
+          "user_id",
+          userId
+        )
+        .maybeSingle();
+
+    if (restaurantOwnerCheckError) {
+      console.error(
+        "RESTAURANT OWNER CHECK ERROR:",
+        restaurantOwnerCheckError
+      );
+
+      if (createdUser) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          userId
+        );
+      }
+
+      return res.status(500).json({
+        success: false,
+        error:
+          restaurantOwnerCheckError.message,
+      });
+    }
+
+    // =====================================================
+    // ALREADY RESTAURANT OWNER
+    // =====================================================
+
+    if (existingRestaurantOwner) {
+      return res.status(409).json({
+        success: false,
+
+        error:
+          "This Nasara user is already a restaurant owner.",
+
+        already_owner:
+          true,
+
+        existing_user:
+          existingUser,
+
+        user_id:
+          userId,
+
+        restaurant_owner_id:
+          existingRestaurantOwner.id,
+
+        restaurant_id:
+          existingRestaurantOwner.restaurant_id,
+
+        status:
+          existingRestaurantOwner.status,
+      });
+    }
+
+    // =====================================================
+    // CREATE RESTAURANT OWNER ACCESS
+    //
+    // restaurant_id is NULL for now.
+    //
+    // The owner will create the restaurant from the
+    // Restaurant Dashboard.
+    // =====================================================
+
+    const {
+      data: restaurantOwner,
+      error:
+        restaurantOwnerInsertError,
+    } =
+      await supabaseAdmin
+        .from("restaurant_owners")
+        .insert({
+          user_id:
+            userId,
+
+          restaurant_id:
+            null,
+
+          status:
+            "active",
+        })
+        .select()
+        .single();
+
+    if (restaurantOwnerInsertError) {
+      console.error(
+        "RESTAURANT OWNER INSERT ERROR:",
+        restaurantOwnerInsertError
+      );
+
+      // If this was a newly created account,
+      // clean up Auth so we don't leave an incomplete account.
+      if (createdUser) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          userId
+        );
+      }
+
+      return res.status(500).json({
+        success: false,
+        error:
+          restaurantOwnerInsertError.message,
+      });
+    }
+
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    console.log(
+      "RESTAURANT OWNER CREATED SUCCESSFULLY:",
+      {
+        user_id:
+          userId,
+
+        restaurant_owner_id:
+          restaurantOwner.id,
+
+        existing_user:
+          existingUser,
+
+        created_user:
+          createdUser,
+      }
+    );
+
+    return res.status(
+      createdUser ? 201 : 200
+    ).json({
+      success: true,
+
+      user_id:
+        userId,
+
+      restaurant_owner_id:
+        restaurantOwner.id,
+
+      restaurant_id:
+        null,
+
+      existing_user:
+        existingUser,
+
+      created_user:
+        createdUser,
+
+      full_name:
+        normalizedName,
+
+      email:
+        normalizedEmail,
+
+      message:
+        existingUser
+          ? "Existing Nasara user has been added as a restaurant owner."
+          : "New Nasara user and restaurant owner account created successfully.",
+    });
+
+  } catch (err) {
+
+    console.error(
+      "CREATE RESTAURANT OWNER ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      success: false,
+      error:
+        err?.message ||
+        "Internal server error",
+    });
+  }
+});
 /* ================= CREATE CONSTITUENCY ADMIN ================= */
 app.post("/create-constituency-admin", async (req, res) => {
   try {
