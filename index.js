@@ -823,6 +823,215 @@ app.post("/create-restaurant-owner", async (req, res) => {
     });
   }
 });
+/* =========================================================
+   GET NEAREST RESTAURANTS
+   Customer current GPS → Restaurant saved GPS
+
+   Uses the SAME distance calculation as
+   /emergency-hospitals
+========================================================= */
+
+router.get(
+  "/nearby-restaurants",
+  async (req, res) => {
+    try {
+      const latitude = Number(req.query.latitude);
+      const longitude = Number(req.query.longitude);
+
+      /*
+       * Customer current location is required
+       */
+      if (
+        !Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Valid customer current location is required.",
+        });
+      }
+
+      /*
+       * Get active restaurants.
+       *
+       * latitude / longitude are the SAVED
+       * coordinates of each restaurant.
+       */
+      const {
+        data,
+        error,
+      } = await supabaseAdmin
+        .from("restaurants")
+        .select(`
+          id,
+          owner_id,
+          name,
+          description,
+          phone,
+          whatsapp_phone,
+          address,
+          latitude,
+          longitude,
+          logo_url,
+          cover_image_url,
+          opening_time,
+          closing_time,
+          is_open,
+          status,
+          momo_provider,
+          momo_number,
+          momo_account_name,
+          accepts_momo,
+          accepts_cash,
+          accepts_card
+        `)
+        .eq("status", "active");
+
+      if (error) {
+        return res.status(400).json({
+          success: false,
+          error: error.message,
+        });
+      }
+
+      /*
+       * Convert degrees to radians.
+       *
+       * SAME FORMULA AS EMERGENCY HOSPITALS.
+       */
+      const toRadians = (value) =>
+        value * (Math.PI / 180);
+
+      /*
+       * Calculate distance:
+       *
+       * CUSTOMER CURRENT LOCATION
+       *          ↓
+       *     RESTAURANT GPS
+       */
+      const restaurants = (data || []).map(
+        (restaurant) => {
+          const restaurantLat = Number(
+            restaurant.latitude
+          );
+
+          const restaurantLng = Number(
+            restaurant.longitude
+          );
+
+          /*
+           * Restaurant has no valid coordinates.
+           * Put it at the bottom.
+           */
+          if (
+            !Number.isFinite(restaurantLat) ||
+            !Number.isFinite(restaurantLng)
+          ) {
+            return {
+              ...restaurant,
+              distance_km: null,
+            };
+          }
+
+          /*
+           * SAME EARTH RADIUS AS HOSPITAL ENDPOINT
+           */
+          const R = 6371;
+
+          const dLat = toRadians(
+            restaurantLat - latitude
+          );
+
+          const dLng = toRadians(
+            restaurantLng - longitude
+          );
+
+          const a =
+            Math.sin(dLat / 2) *
+              Math.sin(dLat / 2) +
+            Math.cos(
+              toRadians(latitude)
+            ) *
+              Math.cos(
+                toRadians(restaurantLat)
+              ) *
+              Math.sin(dLng / 2) *
+              Math.sin(dLng / 2);
+
+          const c =
+            2 *
+            Math.atan2(
+              Math.sqrt(a),
+              Math.sqrt(1 - a)
+            );
+
+          const distanceKm =
+            Number(
+              (R * c).toFixed(2)
+            );
+
+          return {
+            ...restaurant,
+            distance_km: distanceKm,
+          };
+        }
+      );
+
+      /*
+       * Nearest restaurant first.
+       *
+       * Restaurants without coordinates
+       * are placed at the bottom.
+       */
+      restaurants.sort((a, b) => {
+        if (
+          a.distance_km === null
+        ) {
+          return 1;
+        }
+
+        if (
+          b.distance_km === null
+        ) {
+          return -1;
+        }
+
+        return (
+          a.distance_km -
+          b.distance_km
+        );
+      });
+
+      return res.json({
+        success: true,
+
+        customer_location: {
+          latitude,
+          longitude,
+        },
+
+        restaurants,
+      });
+    } catch (err) {
+      console.log(
+        "Nearby restaurants error:",
+        err
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          err?.message ||
+          "Unable to find nearby restaurants.",
+      });
+    }
+  }
+);
 /* ================= CREATE CONSTITUENCY ADMIN ================= */
 app.post("/create-constituency-admin", async (req, res) => {
   try {
