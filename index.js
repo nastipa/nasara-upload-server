@@ -1069,6 +1069,415 @@ const temporaryPassword =
     });
   }
 });
+/* ================= CREATE BUSINESS OWNER ================= */
+
+app.post("/create-business-owner", async (req, res) => {
+  try {
+    const {
+      email,
+      full_name,
+      company_name,
+      website_id,
+    } = req.body;
+
+    // ==================================================
+    // VALIDATION
+    // ==================================================
+
+    if (
+      !email ||
+      !full_name ||
+      !company_name ||
+      !website_id
+    ) {
+      return res.status(400).json({
+        error:
+          "Email, full name, company name, and website ID are required",
+      });
+    }
+
+    const normalizedEmail =
+      email.trim().toLowerCase();
+
+    const normalizedName =
+      full_name.trim();
+
+    const normalizedCompanyName =
+      company_name.trim();
+
+    if (
+      !normalizedEmail ||
+      !normalizedName ||
+      !normalizedCompanyName
+    ) {
+      return res.status(400).json({
+        error:
+          "Email, full name, and company name are required",
+      });
+    }
+
+    // ==================================================
+    // GENERATE TEMPORARY PASSWORD
+    // ==================================================
+
+    const temporaryPassword =
+      Math.random()
+        .toString(36)
+        .slice(-8) +
+      Math.floor(
+        1000 + Math.random() * 9000
+      );
+
+    let userId = null;
+    let existingUser = false;
+
+    // ==================================================
+    // CHECK IF WEBSITE EXISTS
+    // ==================================================
+
+    const {
+      data: website,
+      error: websiteError,
+    } =
+      await supabaseAdmin
+        .from("websites")
+        .select("id, name")
+        .eq("id", website_id)
+        .maybeSingle();
+
+    if (websiteError) {
+      return res.status(400).json({
+        error:
+          "Unable to check website: " +
+          websiteError.message,
+      });
+    }
+
+    if (!website) {
+      return res.status(404).json({
+        error:
+          "Website not found.",
+      });
+    }
+
+    // ==================================================
+    // CHECK IF AUTH USER ALREADY EXISTS
+    // ==================================================
+
+    const {
+      data: usersData,
+      error: usersError,
+    } =
+      await supabaseAdmin.auth.admin.listUsers({
+        page: 1,
+        perPage: 1000,
+      });
+
+    if (usersError) {
+      return res.status(400).json({
+        error:
+          "Unable to check existing users: " +
+          usersError.message,
+      });
+    }
+
+    const existingAuthUser =
+      usersData.users.find(
+        (user) =>
+          user.email?.toLowerCase() ===
+          normalizedEmail
+      );
+
+    // ==================================================
+    // EXISTING AUTH USER
+    // ==================================================
+
+    if (existingAuthUser) {
+      existingUser = true;
+
+      userId =
+        existingAuthUser.id;
+
+      // ------------------------------------------------
+      // Reset password for this owner
+      // ------------------------------------------------
+
+      const {
+        error: updatePasswordError,
+      } =
+        await supabaseAdmin.auth.admin.updateUserById(
+          userId,
+          {
+            password:
+              temporaryPassword,
+          }
+        );
+
+      if (updatePasswordError) {
+        return res.status(400).json({
+          error:
+            "Unable to set temporary password: " +
+            updatePasswordError.message,
+        });
+      }
+    }
+
+    // ==================================================
+    // CREATE NEW AUTH USER
+    // ==================================================
+
+    if (!userId) {
+      const {
+        data: authData,
+        error: authError,
+      } =
+        await supabaseAdmin.auth.admin.createUser({
+          email:
+            normalizedEmail,
+
+          password:
+            temporaryPassword,
+
+          email_confirm: true,
+
+          user_metadata: {
+            full_name:
+              normalizedName,
+          },
+        });
+
+      if (authError) {
+        return res.status(400).json({
+          error:
+            authError.message,
+        });
+      }
+
+      if (!authData?.user) {
+        return res.status(400).json({
+          error:
+            "Auth user could not be created.",
+        });
+      }
+
+      userId =
+        authData.user.id;
+    }
+
+    // ==================================================
+    // CHECK IF THIS USER IS ALREADY A BUSINESS OWNER
+    // ==================================================
+
+    const {
+      data: existingOwner,
+      error: existingOwnerError,
+    } =
+      await supabaseAdmin
+        .from("business_owners")
+        .select("id, website_id")
+        .eq(
+          "auth_user_id",
+          userId
+        )
+        .maybeSingle();
+
+    if (existingOwnerError) {
+      return res.status(400).json({
+        error:
+          existingOwnerError.message,
+      });
+    }
+
+    if (existingOwner) {
+      return res.status(400).json({
+        error:
+          "This user is already a business owner.",
+      });
+    }
+
+    // ==================================================
+    // CHECK IF WEBSITE ALREADY HAS AN OWNER
+    // ==================================================
+
+    const {
+      data: existingWebsiteOwner,
+      error: existingWebsiteOwnerError,
+    } =
+      await supabaseAdmin
+        .from("business_owners")
+        .select("id, auth_user_id, email")
+        .eq(
+          "website_id",
+          website_id
+        )
+        .maybeSingle();
+
+    if (existingWebsiteOwnerError) {
+      return res.status(400).json({
+        error:
+          existingWebsiteOwnerError.message,
+      });
+    }
+
+    if (existingWebsiteOwner) {
+      return res.status(400).json({
+        error:
+          "This website already has a business owner.",
+      });
+    }
+
+    // ==================================================
+    // CREATE BUSINESS OWNER RECORD
+    // ==================================================
+
+    const {
+      data: businessOwner,
+      error: insertError,
+    } =
+      await supabaseAdmin
+        .from("business_owners")
+        .insert({
+          auth_user_id:
+            userId,
+
+          website_id:
+            website_id,
+
+          company_name:
+            normalizedCompanyName,
+
+          full_name:
+            normalizedName,
+
+          email:
+            normalizedEmail,
+
+          must_change_password:
+            true,
+
+          status:
+            "active",
+        })
+        .select()
+        .single();
+
+    if (insertError) {
+      return res.status(400).json({
+        error:
+          insertError.message,
+      });
+    }
+
+    // ==================================================
+    // CONNECT OWNER TO WEBSITE
+    // ==================================================
+
+    const {
+      error: websiteUpdateError,
+    } =
+      await supabaseAdmin
+        .from("websites")
+        .update({
+          owner_id:
+            userId,
+
+          owner_email:
+            normalizedEmail,
+
+          handed_over:
+            true,
+
+          handed_over_at:
+            new Date().toISOString(),
+
+          updated_at:
+            new Date().toISOString(),
+        })
+        .eq(
+          "id",
+          website_id
+        );
+
+    if (websiteUpdateError) {
+      // ----------------------------------------------
+      // Roll back the owner record if the website
+      // could not be connected.
+      // ----------------------------------------------
+
+      await supabaseAdmin
+        .from("business_owners")
+        .delete()
+        .eq(
+          "id",
+          businessOwner.id
+        );
+
+      return res.status(400).json({
+        error:
+          "Business owner was created, but the website could not be assigned: " +
+          websiteUpdateError.message,
+      });
+    }
+
+    // ==================================================
+    // SUCCESS
+    // ==================================================
+
+    return res.json({
+      success: true,
+
+      user_id:
+        userId,
+
+      business_owner_id:
+        businessOwner.id,
+
+      website_id:
+        website_id,
+
+      website_name:
+        website.name,
+
+      company_name:
+        normalizedCompanyName,
+
+      full_name:
+        normalizedName,
+
+      email:
+        normalizedEmail,
+
+      role:
+        "business_owner",
+
+      existing_user:
+        existingUser,
+
+      must_change_password:
+        true,
+
+      temporary_password:
+        temporaryPassword,
+
+      message:
+        existingUser
+          ? "Existing Auth user has been assigned as the Business Owner with a new temporary password."
+          : "Business Owner account created successfully with a temporary password.",
+    });
+
+  } catch (err) {
+    console.error(
+      "CREATE BUSINESS OWNER ERROR:",
+      err
+    );
+
+    return res.status(500).json({
+      error:
+        err?.message ||
+        "Internal server error",
+    });
+  }
+});
 /* ================= CREATE HUB360 ADMIN ================= */
 
 app.post("/create-hub360-admin", async (req, res) => {
