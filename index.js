@@ -1072,6 +1072,9 @@ const temporaryPassword =
 /* ================= CREATE BUSINESS OWNER ================= */
 
 app.post("/create-business-owner", async (req, res) => {
+  let createdAuthUserId = null;
+  let createdBusinessOwnerId = null;
+
   try {
     const {
       email,
@@ -1092,27 +1095,31 @@ app.post("/create-business-owner", async (req, res) => {
     ) {
       return res.status(400).json({
         error:
-          "Email, full name, company name, and website ID are required",
+          "Email, full name, company name, and website ID are required.",
       });
     }
 
     const normalizedEmail =
-      email.trim().toLowerCase();
+      String(email).trim().toLowerCase();
 
     const normalizedName =
-      full_name.trim();
+      String(full_name).trim();
 
     const normalizedCompanyName =
-      company_name.trim();
+      String(company_name).trim();
+
+    const normalizedWebsiteId =
+      String(website_id).trim();
 
     if (
       !normalizedEmail ||
       !normalizedName ||
-      !normalizedCompanyName
+      !normalizedCompanyName ||
+      !normalizedWebsiteId
     ) {
       return res.status(400).json({
         error:
-          "Email, full name, and company name are required",
+          "Email, full name, company name, and website ID are required.",
       });
     }
 
@@ -1132,8 +1139,13 @@ app.post("/create-business-owner", async (req, res) => {
     let existingUser = false;
 
     // ==================================================
-    // CHECK IF WEBSITE EXISTS
+    // CHECK WEBSITE
     // ==================================================
+
+    console.log(
+      "Checking website:",
+      normalizedWebsiteId
+    );
 
     const {
       data: website,
@@ -1141,28 +1153,66 @@ app.post("/create-business-owner", async (req, res) => {
     } =
       await supabaseAdmin
         .from("websites")
-        .select("id, name")
-        .eq("id", website_id)
+        .select(
+          "id,name,website_type,status,owner_id,owner_email,handed_over"
+        )
+        .eq(
+          "id",
+          normalizedWebsiteId
+        )
         .maybeSingle();
 
     if (websiteError) {
-      return res.status(400).json({
+      console.error(
+        "WEBSITE LOOKUP ERROR:",
+        websiteError
+      );
+
+      return res.status(500).json({
         error:
-          "Unable to check website: " +
+          "The server could not access the websites table.",
+        details:
           websiteError.message,
+        code:
+          websiteError.code || null,
+        hint:
+          websiteError.hint || null,
       });
     }
 
     if (!website) {
       return res.status(404).json({
         error:
-          "Website not found.",
+          "Website not found. Please refresh the Business Owner page and select the website again.",
+      });
+    }
+
+    // ==================================================
+    // CHECK IF WEBSITE ALREADY HAS OWNER
+    // ==================================================
+
+    if (website.owner_id) {
+      return res.status(400).json({
+        error:
+          "This website already has a business owner.",
+      });
+    }
+
+    if (website.handed_over) {
+      return res.status(400).json({
+        error:
+          "This website has already been handed over.",
       });
     }
 
     // ==================================================
     // CHECK IF AUTH USER ALREADY EXISTS
     // ==================================================
+
+    console.log(
+      "Checking existing Auth user:",
+      normalizedEmail
+    );
 
     const {
       data: usersData,
@@ -1174,15 +1224,21 @@ app.post("/create-business-owner", async (req, res) => {
       });
 
     if (usersError) {
-      return res.status(400).json({
+      console.error(
+        "AUTH USER LOOKUP ERROR:",
+        usersError
+      );
+
+      return res.status(500).json({
         error:
-          "Unable to check existing users: " +
+          "Unable to check existing Auth users.",
+        details:
           usersError.message,
       });
     }
 
     const existingAuthUser =
-      usersData.users.find(
+      usersData?.users?.find(
         (user) =>
           user.email?.toLowerCase() ===
           normalizedEmail
@@ -1198,8 +1254,54 @@ app.post("/create-business-owner", async (req, res) => {
       userId =
         existingAuthUser.id;
 
+      console.log(
+        "Existing Auth user found:",
+        userId
+      );
+
       // ------------------------------------------------
-      // Reset password for this owner
+      // Check whether this Auth user already belongs
+      // to a Business Owner account.
+      // ------------------------------------------------
+
+      const {
+        data: existingOwner,
+        error: existingOwnerError,
+      } =
+        await supabaseAdmin
+          .from("business_owners")
+          .select(
+            "id,website_id,company_name,status"
+          )
+          .eq(
+            "auth_user_id",
+            userId
+          )
+          .maybeSingle();
+
+      if (existingOwnerError) {
+        console.error(
+          "EXISTING OWNER LOOKUP ERROR:",
+          existingOwnerError
+        );
+
+        return res.status(500).json({
+          error:
+            "Unable to check the existing Business Owner record.",
+          details:
+            existingOwnerError.message,
+        });
+      }
+
+      if (existingOwner) {
+        return res.status(400).json({
+          error:
+            "This user is already a Business Owner.",
+        });
+      }
+
+      // ------------------------------------------------
+      // Reset password
       // ------------------------------------------------
 
       const {
@@ -1210,13 +1312,24 @@ app.post("/create-business-owner", async (req, res) => {
           {
             password:
               temporaryPassword,
+
+            user_metadata: {
+              full_name:
+                normalizedName,
+            },
           }
         );
 
       if (updatePasswordError) {
+        console.error(
+          "PASSWORD RESET ERROR:",
+          updatePasswordError
+        );
+
         return res.status(400).json({
           error:
-            "Unable to set temporary password: " +
+            "Unable to set the temporary password.",
+          details:
             updatePasswordError.message,
         });
       }
@@ -1227,6 +1340,11 @@ app.post("/create-business-owner", async (req, res) => {
     // ==================================================
 
     if (!userId) {
+      console.log(
+        "Creating new Auth user:",
+        normalizedEmail
+      );
+
       const {
         data: authData,
         error: authError,
@@ -1238,7 +1356,8 @@ app.post("/create-business-owner", async (req, res) => {
           password:
             temporaryPassword,
 
-          email_confirm: true,
+          email_confirm:
+            true,
 
           user_metadata: {
             full_name:
@@ -1247,6 +1366,11 @@ app.post("/create-business-owner", async (req, res) => {
         });
 
       if (authError) {
+        console.error(
+          "AUTH CREATE ERROR:",
+          authError
+        );
+
         return res.status(400).json({
           error:
             authError.message,
@@ -1262,41 +1386,18 @@ app.post("/create-business-owner", async (req, res) => {
 
       userId =
         authData.user.id;
+
+      createdAuthUserId =
+        userId;
+
+      console.log(
+        "New Auth user created:",
+        userId
+      );
     }
 
     // ==================================================
-    // CHECK IF THIS USER IS ALREADY A BUSINESS OWNER
-    // ==================================================
-
-    const {
-      data: existingOwner,
-      error: existingOwnerError,
-    } =
-      await supabaseAdmin
-        .from("business_owners")
-        .select("id, website_id")
-        .eq(
-          "auth_user_id",
-          userId
-        )
-        .maybeSingle();
-
-    if (existingOwnerError) {
-      return res.status(400).json({
-        error:
-          existingOwnerError.message,
-      });
-    }
-
-    if (existingOwner) {
-      return res.status(400).json({
-        error:
-          "This user is already a business owner.",
-      });
-    }
-
-    // ==================================================
-    // CHECK IF WEBSITE ALREADY HAS AN OWNER
+    // CHECK WEBSITE OWNER AGAIN
     // ==================================================
 
     const {
@@ -1305,21 +1406,44 @@ app.post("/create-business-owner", async (req, res) => {
     } =
       await supabaseAdmin
         .from("business_owners")
-        .select("id, auth_user_id, email")
+        .select(
+          "id,auth_user_id,email"
+        )
         .eq(
           "website_id",
-          website_id
+          normalizedWebsiteId
         )
         .maybeSingle();
 
     if (existingWebsiteOwnerError) {
-      return res.status(400).json({
+      console.error(
+        "WEBSITE OWNER LOOKUP ERROR:",
+        existingWebsiteOwnerError
+      );
+
+      // Roll back newly created Auth user
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
+        );
+      }
+
+      return res.status(500).json({
         error:
+          "Unable to check whether this website already has an owner.",
+        details:
           existingWebsiteOwnerError.message,
       });
     }
 
     if (existingWebsiteOwner) {
+      // Roll back newly created Auth user
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
+        );
+      }
+
       return res.status(400).json({
         error:
           "This website already has a business owner.",
@@ -1329,6 +1453,10 @@ app.post("/create-business-owner", async (req, res) => {
     // ==================================================
     // CREATE BUSINESS OWNER RECORD
     // ==================================================
+
+    console.log(
+      "Creating Business Owner record..."
+    );
 
     const {
       data: businessOwner,
@@ -1341,7 +1469,7 @@ app.post("/create-business-owner", async (req, res) => {
             userId,
 
           website_id:
-            website_id,
+            normalizedWebsiteId,
 
           company_name:
             normalizedCompanyName,
@@ -1362,17 +1490,39 @@ app.post("/create-business-owner", async (req, res) => {
         .single();
 
     if (insertError) {
+      console.error(
+        "BUSINESS OWNER INSERT ERROR:",
+        insertError
+      );
+
+      // Roll back newly created Auth user
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
+        );
+      }
+
       return res.status(400).json({
         error:
+          "Unable to create the Business Owner record.",
+        details:
           insertError.message,
       });
     }
+
+    createdBusinessOwnerId =
+      businessOwner.id;
 
     // ==================================================
     // CONNECT OWNER TO WEBSITE
     // ==================================================
 
+    console.log(
+      "Assigning Business Owner to website..."
+    );
+
     const {
+      data: updatedWebsite,
       error: websiteUpdateError,
     } =
       await supabaseAdmin
@@ -1395,27 +1545,71 @@ app.post("/create-business-owner", async (req, res) => {
         })
         .eq(
           "id",
-          website_id
-        );
+          normalizedWebsiteId
+        )
+        .select(
+          "id,name,owner_id,owner_email,handed_over"
+        )
+        .maybeSingle();
 
     if (websiteUpdateError) {
-      // ----------------------------------------------
-      // Roll back the owner record if the website
-      // could not be connected.
-      // ----------------------------------------------
+      console.error(
+        "WEBSITE UPDATE ERROR:",
+        websiteUpdateError
+      );
 
-      await supabaseAdmin
-        .from("business_owners")
-        .delete()
-        .eq(
-          "id",
-          businessOwner.id
+      // Roll back Business Owner record
+      if (createdBusinessOwnerId) {
+        await supabaseAdmin
+          .from("business_owners")
+          .delete()
+          .eq(
+            "id",
+            createdBusinessOwnerId
+          );
+      }
+
+      // Roll back newly created Auth user
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
         );
+      }
 
       return res.status(400).json({
         error:
-          "Business owner was created, but the website could not be assigned: " +
+          "Business Owner was not assigned because the website could not be updated.",
+        details:
           websiteUpdateError.message,
+      });
+    }
+
+    if (!updatedWebsite) {
+      console.error(
+        "Website update returned no record."
+      );
+
+      // Roll back Business Owner record
+      if (createdBusinessOwnerId) {
+        await supabaseAdmin
+          .from("business_owners")
+          .delete()
+          .eq(
+            "id",
+            createdBusinessOwnerId
+          );
+      }
+
+      // Roll back newly created Auth user
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
+        );
+      }
+
+      return res.status(400).json({
+        error:
+          "The website could not be confirmed after owner assignment.",
       });
     }
 
@@ -1423,8 +1617,20 @@ app.post("/create-business-owner", async (req, res) => {
     // SUCCESS
     // ==================================================
 
+    console.log(
+      "Business Owner successfully created:",
+      {
+        userId,
+        businessOwnerId:
+          businessOwner.id,
+        websiteId:
+          normalizedWebsiteId,
+      }
+    );
+
     return res.json({
-      success: true,
+      success:
+        true,
 
       user_id:
         userId,
@@ -1433,7 +1639,7 @@ app.post("/create-business-owner", async (req, res) => {
         businessOwner.id,
 
       website_id:
-        website_id,
+        normalizedWebsiteId,
 
       website_name:
         website.name,
@@ -1467,14 +1673,41 @@ app.post("/create-business-owner", async (req, res) => {
 
   } catch (err) {
     console.error(
-      "CREATE BUSINESS OWNER ERROR:",
+      "CREATE BUSINESS OWNER UNEXPECTED ERROR:",
       err
     );
+
+    // ==================================================
+    // EMERGENCY ROLLBACK
+    // ==================================================
+
+    try {
+      if (createdBusinessOwnerId) {
+        await supabaseAdmin
+          .from("business_owners")
+          .delete()
+          .eq(
+            "id",
+            createdBusinessOwnerId
+          );
+      }
+
+      if (createdAuthUserId) {
+        await supabaseAdmin.auth.admin.deleteUser(
+          createdAuthUserId
+        );
+      }
+    } catch (rollbackError) {
+      console.error(
+        "ROLLBACK ERROR:",
+        rollbackError
+      );
+    }
 
     return res.status(500).json({
       error:
         err?.message ||
-        "Internal server error",
+        "Internal server error.",
     });
   }
 });
