@@ -35,7 +35,12 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+/* ================= WEBSITE GENERATOR SUPABASE ADMIN ================= */
 
+const websiteGeneratorAdmin = createClient(
+  process.env.WEBSITE_GENERATOR_SUPABASE_URL,
+  process.env.WEBSITE_GENERATOR_SUPABASE_SERVICE_ROLE_KEY
+);
 /* ================= UPLOAD ROUTE ================= */
 app.post("/upload", upload.single("file"), async (req, res) => {
   try {
@@ -1151,7 +1156,7 @@ app.post("/create-business-owner", async (req, res) => {
       data: website,
       error: websiteError,
     } =
-      await supabaseAdmin
+      await websiteGeneratorAdmin
         .from("websites")
         .select(
           "id,name,website_type,status,owner_id,owner_email,handed_over"
@@ -1218,7 +1223,7 @@ app.post("/create-business-owner", async (req, res) => {
       data: usersData,
       error: usersError,
     } =
-      await supabaseAdmin.auth.admin.listUsers({
+      await websiteGeneratorAdmin.auth.admin.listUsers({
         page: 1,
         perPage: 1000,
       });
@@ -1268,7 +1273,7 @@ app.post("/create-business-owner", async (req, res) => {
         data: existingOwner,
         error: existingOwnerError,
       } =
-        await supabaseAdmin
+        await websiteGeneratorAdmin
           .from("business_owners")
           .select(
             "id,website_id,company_name,status"
@@ -1307,7 +1312,7 @@ app.post("/create-business-owner", async (req, res) => {
       const {
         error: updatePasswordError,
       } =
-        await supabaseAdmin.auth.admin.updateUserById(
+        await websiteGeneratorAdmin.auth.admin.updateUserById(
           userId,
           {
             password:
@@ -1349,7 +1354,7 @@ app.post("/create-business-owner", async (req, res) => {
         data: authData,
         error: authError,
       } =
-        await supabaseAdmin.auth.admin.createUser({
+        await websiteGeneratorAdmin.auth.admin.createUser({
           email:
             normalizedEmail,
 
@@ -1404,7 +1409,7 @@ app.post("/create-business-owner", async (req, res) => {
       data: existingWebsiteOwner,
       error: existingWebsiteOwnerError,
     } =
-      await supabaseAdmin
+      await websiteGeneratorAdmin
         .from("business_owners")
         .select(
           "id,auth_user_id,email"
@@ -1423,7 +1428,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back newly created Auth user
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
@@ -1439,7 +1444,7 @@ app.post("/create-business-owner", async (req, res) => {
     if (existingWebsiteOwner) {
       // Roll back newly created Auth user
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
@@ -1462,7 +1467,7 @@ app.post("/create-business-owner", async (req, res) => {
       data: businessOwner,
       error: insertError,
     } =
-      await supabaseAdmin
+      await websiteGeneratorAdmin
         .from("business_owners")
         .insert({
           auth_user_id:
@@ -1497,7 +1502,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back newly created Auth user
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
@@ -1525,7 +1530,7 @@ app.post("/create-business-owner", async (req, res) => {
       data: updatedWebsite,
       error: websiteUpdateError,
     } =
-      await supabaseAdmin
+      await websiteGeneratorAdmin
         .from("websites")
         .update({
           owner_id:
@@ -1560,7 +1565,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back Business Owner record
       if (createdBusinessOwnerId) {
-        await supabaseAdmin
+        await websiteGeneratorAdmin
           .from("business_owners")
           .delete()
           .eq(
@@ -1571,7 +1576,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back newly created Auth user
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
@@ -1591,7 +1596,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back Business Owner record
       if (createdBusinessOwnerId) {
-        await supabaseAdmin
+        await websiteGeneratorAdmin
           .from("business_owners")
           .delete()
           .eq(
@@ -1602,7 +1607,7 @@ app.post("/create-business-owner", async (req, res) => {
 
       // Roll back newly created Auth user
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
@@ -1683,7 +1688,7 @@ app.post("/create-business-owner", async (req, res) => {
 
     try {
       if (createdBusinessOwnerId) {
-        await supabaseAdmin
+        await websiteGeneratorAdmin
           .from("business_owners")
           .delete()
           .eq(
@@ -1693,7 +1698,7 @@ app.post("/create-business-owner", async (req, res) => {
       }
 
       if (createdAuthUserId) {
-        await supabaseAdmin.auth.admin.deleteUser(
+        await websiteGeneratorAdmin.auth.admin.deleteUser(
           createdAuthUserId
         );
       }
