@@ -8,7 +8,6 @@ const hospitalRoutes = require("./routes/hospital");
 const restaurantRoutes = require("./routes/restaurant");
 
 const { createClient } = require("@supabase/supabase-js");
-const fetch = require("node-fetch");
 const AdmZip = require("adm-zip");
 const notifyUser = require("./services/notifyUser");
 
