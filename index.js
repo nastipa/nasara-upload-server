@@ -2855,7 +2855,6 @@ function createNetlifySiteName(websiteName, websiteId) {
 
   return `${cleanName || "website"}-${idSuffix}`;
 }
-
 app.post("/publish-website-to-netlify", async (req, res) => {
   try {
     /* =========================
@@ -2892,7 +2891,6 @@ app.post("/publish-website-to-netlify", async (req, res) => {
         error: "Invalid authorization token.",
       });
     }
-
     /* =========================
        VERIFY SUPABASE USER
        ========================= */
