@@ -9,7 +9,7 @@ const restaurantRoutes = require("./routes/restaurant");
 
 const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
-const archiver = require("archiver");
+const AdmZip = require("adm-zip");
 const notifyUser = require("./services/notifyUser");
 
 const app = express();
@@ -2831,83 +2831,41 @@ function createNetlifySiteName(siteName, websiteId) {
 
 
 // ============================================================
-// CREATE ZIP FILE FOR NETLIFY
+// CREATE NETLIFY ZIP
 // ============================================================
 
 function createNetlifyZip(html) {
-  return new Promise((resolve, reject) => {
-    try {
-      console.log("Starting Netlify ZIP creation...");
+  try {
+    console.log("Creating Netlify ZIP using ADM-ZIP...");
 
-      const archive = archiver("zip", {
-        zlib: {
-          level: 9,
-        },
-      });
+    const zip = new AdmZip();
 
-      const chunks = [];
+    zip.addFile(
+      "index.html",
+      Buffer.from(html, "utf8")
+    );
 
-      archive.on("data", (chunk) => {
-        chunks.push(chunk);
-      });
+    const zipBuffer = zip.toBuffer();
 
-      archive.on("error", (error) => {
-        console.error(
-          "Netlify ZIP archive error:",
-          error
-        );
+    console.log(
+      "Netlify ZIP created successfully."
+    );
 
-        reject(error);
-      });
+    console.log(
+      "ZIP size:",
+      zipBuffer.length,
+      "bytes"
+    );
 
-      archive.on("end", () => {
-        try {
-          const zipBuffer = Buffer.concat(chunks);
+    return zipBuffer;
+  } catch (error) {
+    console.error(
+      "Failed to create Netlify ZIP:",
+      error
+    );
 
-          console.log(
-            "Netlify ZIP created successfully."
-          );
-
-          console.log(
-            "ZIP size:",
-            zipBuffer.length,
-            "bytes"
-          );
-
-          resolve(zipBuffer);
-        } catch (error) {
-          reject(error);
-        }
-      });
-
-      archive.append(html, {
-        name: "index.html",
-      });
-
-      const finalizeResult = archive.finalize();
-
-      if (
-        finalizeResult &&
-        typeof finalizeResult.catch === "function"
-      ) {
-        finalizeResult.catch((error) => {
-          console.error(
-            "Netlify ZIP finalize error:",
-            error
-          );
-
-          reject(error);
-        });
-      }
-    } catch (error) {
-      console.error(
-        "Netlify ZIP creation failed:",
-        error
-      );
-
-      reject(error);
-    }
-  });
+    throw error;
+  }
 }
 
 

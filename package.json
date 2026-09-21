@@ -14,7 +14,7 @@
     "@aws-sdk/client-s3": "^3.1037.0",
     "@aws-sdk/s3-request-presigner": "^3.1037.0",
     "@supabase/supabase-js": "^2.103.3",
-    "archiver": "^8.0.0",
+    "adm-zip": "^0.6.1",
     "aws-sdk": "^2.1693.0",
     "axios": "^1.19.0",
     "cors": "^2.8.6",
