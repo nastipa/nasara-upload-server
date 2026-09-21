@@ -9,7 +9,10 @@ const restaurantRoutes = require("./routes/restaurant");
 
 const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
-const archiver = require("archiver")
+const archiverModule = require("archiver");
+const archiver =
+  archiverModule.default ||
+  archiverModule;
 const notifyUser = require("./services/notifyUser");
 
 const app = express();
