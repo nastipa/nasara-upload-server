@@ -2809,494 +2809,956 @@ app.use("/hospital", hospitalRoutes);
 /* ================= RESTAURANT ROUTES ================= */
 app.use("/restaurant", restaurantRoutes);
 
-/* =========================================================
-   PUBLISH WEBSITE TO NETLIFY
-   ========================================================= */
+// ============================================================
+// NETLIFY WEBSITE PUBLISHING
+// ============================================================
 
-function createNetlifyZip(html) {
-  return new Promise((resolve, reject) => {
-    const archive = archiver("zip", {
-      zlib: { level: 9 },
-    });
-
-    const chunks = [];
-
-    archive.on("data", (chunk) => {
-      chunks.push(chunk);
-    });
-
-    archive.on("end", () => {
-      resolve(Buffer.concat(chunks));
-    });
-
-    archive.on("error", (error) => {
-      reject(error);
-    });
-
-    archive.append(html, {
-      name: "index.html",
-    });
-
-    archive.finalize().catch(reject);
-  });
-}
-function createNetlifySiteName(websiteName, websiteId) {
-  const cleanName = String(websiteName || "website")
+function createNetlifySiteName(siteName, websiteId) {
+  const cleanName = String(siteName || "website")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
-    .slice(0, 45);
+    .slice(0, 40);
 
-  const idSuffix = String(websiteId || "")
-    .replace(/-/g, "")
-    .slice(0, 8)
+  const shortId = String(websiteId || "")
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(-8)
     .toLowerCase();
 
-  return `${cleanName || "website"}-${idSuffix}`;
+  return `${cleanName || "website"}-${shortId}`;
 }
-app.post("/publish-website-to-netlify", async (req, res) => {
-  try {
-    /* =========================
-       CHECK NETLIFY TOKEN
-       ========================= */
 
-    if (!process.env.NETLIFY_AUTH_TOKEN) {
-      return res.status(500).json({
-        success: false,
-        error: "NETLIFY_AUTH_TOKEN is not configured on the server.",
+
+// ============================================================
+// CREATE ZIP FILE FOR NETLIFY
+// ============================================================
+
+function createNetlifyZip(html) {
+  return new Promise((resolve, reject) => {
+    try {
+      console.log("Starting Netlify ZIP creation...");
+
+      const archive = archiver("zip", {
+        zlib: {
+          level: 9,
+        },
       });
-    }
 
-    /* =========================
-       CHECK AUTHORIZATION HEADER
-       ========================= */
+      const chunks = [];
 
-    const authorization =
-      req.headers.authorization || "";
-
-    if (!authorization.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        error: "Missing authorization token.",
+      archive.on("data", (chunk) => {
+        chunks.push(chunk);
       });
-    }
 
-    const accessToken =
-      authorization.replace("Bearer ", "").trim();
+      archive.on("error", (error) => {
+        console.error(
+          "Netlify ZIP archive error:",
+          error
+        );
 
-    if (!accessToken) {
-      return res.status(401).json({
-        success: false,
-        error: "Invalid authorization token.",
+        reject(error);
       });
-    }
-    /* =========================
-       VERIFY SUPABASE USER
-       ========================= */
 
-    const {
-      data: userData,
-      error: userError,
-    } =
-      await websiteGeneratorAdmin.auth.getUser(
-        accessToken
-      );
+      archive.on("end", () => {
+        try {
+          const zipBuffer = Buffer.concat(chunks);
 
-    if (userError || !userData?.user) {
+          console.log(
+            "Netlify ZIP created successfully."
+          );
+
+          console.log(
+            "ZIP size:",
+            zipBuffer.length,
+            "bytes"
+          );
+
+          resolve(zipBuffer);
+        } catch (error) {
+          reject(error);
+        }
+      });
+
+      archive.append(html, {
+        name: "index.html",
+      });
+
+      const finalizeResult = archive.finalize();
+
+      if (
+        finalizeResult &&
+        typeof finalizeResult.catch === "function"
+      ) {
+        finalizeResult.catch((error) => {
+          console.error(
+            "Netlify ZIP finalize error:",
+            error
+          );
+
+          reject(error);
+        });
+      }
+    } catch (error) {
       console.error(
-        "Website generator auth error:",
-        userError
+        "Netlify ZIP creation failed:",
+        error
       );
 
-      return res.status(401).json({
-        success: false,
-        error: "Invalid or expired login session.",
-      });
+      reject(error);
     }
+  });
+}
 
-    const user = userData.user;
 
-    /* =========================
-       VERIFY GENERATOR ADMIN
-       ========================= */
+// ============================================================
+// PUBLISH WEBSITE TO NETLIFY
+// ============================================================
 
-    const {
-      data: generatorAdmin,
-      error: generatorAdminError,
-    } = await websiteGeneratorAdmin
-      .from("generator_admins")
-      .select("id, auth_user_id, full_name, email, role, status")
-      .eq("auth_user_id", user.id)
-      .eq("status", "active")
-      .maybeSingle();
-
-    if (
-      generatorAdminError ||
-      !generatorAdmin
-    ) {
-      console.error(
-        "Generator admin verification error:",
-        generatorAdminError
-      );
-
-      return res.status(403).json({
-        success: false,
-        error:
-          "You are not authorized to publish websites.",
-      });
-    }
-
-    /* =========================
-       VALIDATE REQUEST
-       ========================= */
-
-    const {
-      website_id,
-      site_name,
-      html,
-    } = req.body || {};
-
-    if (!website_id) {
-      return res.status(400).json({
-        success: false,
-        error: "website_id is required.",
-      });
-    }
-
-    if (!html || typeof html !== "string") {
-      return res.status(400).json({
-        success: false,
-        error: "Generated HTML is required.",
-      });
-    }
-
-    if (html.length > 20 * 1024 * 1024) {
-      return res.status(400).json({
-        success: false,
-        error: "Generated website HTML is too large.",
-      });
-    }
-
-    /* =========================
-       LOAD WEBSITE
-       ========================= */
-
-    const {
-      data: website,
-      error: websiteError,
-    } = await websiteGeneratorAdmin
-      .from("websites")
-      .select(
-        "id, name, website_type, published_url, netlify_site_id"
-      )
-      .eq("id", website_id)
-      .maybeSingle();
-
-    if (websiteError) {
-      console.error(
-        "Website lookup error:",
-        websiteError
-      );
-
-      return res.status(500).json({
-        success: false,
-        error: "Could not load website.",
-      });
-    }
-
-    if (!website) {
-      return res.status(404).json({
-        success: false,
-        error: "Website was not found.",
-      });
-    }
-
-    /* =========================
-       CREATE ZIP
-       ========================= */
-
-    console.log(
-      "Creating Netlify ZIP for website:",
-      website.id
-    );
-
-    const zipBuffer =
-      await createNetlifyZip(html);
-
-    /* =========================
-       CREATE OR REUSE NETLIFY SITE
-       ========================= */
-
-    let netlifySiteId =
-      website.netlify_site_id || null;
-
-    let netlifySite = null;
-
-    /*
-      If the website already has a Netlify site,
-      reuse it.
-
-      Otherwise create a new Netlify site.
-    */
-
-    if (netlifySiteId) {
+app.post(
+  "/publish-website-to-netlify",
+  async (req, res) => {
+    try {
       console.log(
-        "Reusing existing Netlify site:",
+        "================================================"
+      );
+
+      console.log(
+        "NETLIFY WEBSITE PUBLISH REQUEST"
+      );
+
+      console.log(
+        "================================================"
+      );
+
+
+      // ======================================================
+      // CHECK NETLIFY TOKEN
+      // ======================================================
+
+      if (!process.env.NETLIFY_AUTH_TOKEN) {
+        console.error(
+          "NETLIFY_AUTH_TOKEN is missing."
+        );
+
+        return res.status(500).json({
+          success: false,
+          error:
+            "NETLIFY_AUTH_TOKEN is not configured on the server.",
+        });
+      }
+
+
+      // ======================================================
+      // CHECK USER AUTHORIZATION HEADER
+      // ======================================================
+
+      const authorization =
+        req.headers.authorization || "";
+
+      if (
+        !authorization.startsWith("Bearer ")
+      ) {
+        console.error(
+          "Missing user authorization header."
+        );
+
+        return res.status(401).json({
+          success: false,
+          error:
+            "Missing authorization token.",
+        });
+      }
+
+
+      const accessToken =
+        authorization
+          .replace("Bearer ", "")
+          .trim();
+
+
+      if (!accessToken) {
+        return res.status(401).json({
+          success: false,
+          error:
+            "Invalid authorization token.",
+        });
+      }
+
+
+      console.log(
+        "User authorization token received."
+      );
+
+
+      // ======================================================
+      // VERIFY USER WITH SUPABASE
+      // ======================================================
+
+      const {
+        data: userData,
+        error: userError,
+      } =
+        await websiteGeneratorAdmin.auth.getUser(
+          accessToken
+        );
+
+
+      if (
+        userError ||
+        !userData?.user
+      ) {
+        console.error(
+          "Website generator auth error:",
+          userError
+        );
+
+        return res.status(401).json({
+          success: false,
+          error:
+            "Invalid or expired login session.",
+        });
+      }
+
+
+      const user = userData.user;
+
+
+      console.log(
+        "Authenticated user:",
+        user.id
+      );
+
+
+      // ======================================================
+      // VERIFY GENERATOR ADMIN
+      // ======================================================
+
+      const {
+        data: generatorAdmin,
+        error: generatorAdminError,
+      } =
+        await websiteGeneratorAdmin
+          .from("generator_admins")
+          .select(
+            "id, auth_user_id, full_name, email, role, status"
+          )
+          .eq(
+            "auth_user_id",
+            user.id
+          )
+          .eq(
+            "status",
+            "active"
+          )
+          .maybeSingle();
+
+
+      if (
+        generatorAdminError ||
+        !generatorAdmin
+      ) {
+        console.error(
+          "Generator admin verification error:",
+          generatorAdminError
+        );
+
+        return res.status(403).json({
+          success: false,
+          error:
+            "You are not authorized to publish websites.",
+        });
+      }
+
+
+      console.log(
+        "Generator admin verified:",
+        generatorAdmin.full_name ||
+          generatorAdmin.email
+      );
+
+
+      // ======================================================
+      // READ REQUEST BODY
+      // ======================================================
+
+      const {
+        website_id,
+        site_name,
+        html,
+      } = req.body || {};
+
+
+      console.log(
+        "Website ID:",
+        website_id
+      );
+
+      console.log(
+        "Site name:",
+        site_name
+      );
+
+      console.log(
+        "HTML received:",
+        typeof html === "string"
+      );
+
+      if (!website_id) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "website_id is required.",
+        });
+      }
+
+
+      if (
+        !html ||
+        typeof html !== "string"
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Generated HTML is required.",
+        });
+      }
+
+
+      if (
+        html.length >
+        20 * 1024 * 1024
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Generated website HTML is too large.",
+        });
+      }
+
+
+      console.log(
+        "HTML size:",
+        html.length,
+        "characters"
+      );
+
+
+      // ======================================================
+      // LOAD WEBSITE FROM DATABASE
+      // ======================================================
+
+      const {
+        data: website,
+        error: websiteError,
+      } =
+        await websiteGeneratorAdmin
+          .from("websites")
+          .select(
+            `
+              id,
+              name,
+              website_type,
+              published_url,
+              netlify_site_id
+            `
+          )
+          .eq(
+            "id",
+            website_id
+          )
+          .maybeSingle();
+
+
+      if (websiteError) {
+        console.error(
+          "Website lookup error:",
+          websiteError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error:
+            "Could not load website.",
+        });
+      }
+
+
+      if (!website) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Website was not found.",
+        });
+      }
+
+
+      console.log(
+        "Website found:",
+        website.name
+      );
+
+      console.log(
+        "Existing Netlify site ID:",
+        website.netlify_site_id || "NONE"
+      );
+
+
+      // ======================================================
+      // CREATE ZIP
+      // ======================================================
+
+      console.log(
+        "Creating Netlify ZIP..."
+      );
+
+
+      const zipBuffer =
+        await createNetlifyZip(
+          html
+        );
+
+
+      console.log(
+        "ZIP ready."
+      );
+
+      console.log(
+        "ZIP size:",
+        zipBuffer.length,
+        "bytes"
+      );
+
+
+      // ======================================================
+      // CHECK EXISTING NETLIFY SITE
+      // ======================================================
+
+      let netlifySiteId =
+        website.netlify_site_id ||
+        null;
+
+      let netlifySite =
+        null;
+
+
+      if (netlifySiteId) {
+        console.log(
+          "Checking existing Netlify site:",
+          netlifySiteId
+        );
+
+
+        const siteResponse =
+          await fetch(
+            `https://api.netlify.com/api/v1/sites/${encodeURIComponent(
+              netlifySiteId
+            )}`,
+            {
+              method: "GET",
+
+              headers: {
+                Authorization:
+                 `Bearer ${process.env.NETLIFY_AUTH_TOKEN}`,
+
+                Accept:
+                  "application/json",
+              },
+            }
+          );
+
+
+        if (siteResponse.ok) {
+          netlifySite =
+            await siteResponse.json();
+
+
+          console.log(
+            "Existing Netlify site found."
+          );
+
+
+          console.log(
+            "Netlify site URL:",
+            netlifySite?.ssl_url ||
+              netlifySite?.url ||
+              "not available"
+          );
+        } else {
+          const existingSiteError =
+            await siteResponse.text();
+
+
+          console.warn(
+            "Existing Netlify site could not be loaded."
+          );
+
+
+          console.warn(
+            "Netlify status:",
+            siteResponse.status
+          );
+
+
+          console.warn(
+            "Netlify response:",
+            existingSiteError
+          );
+
+
+          netlifySiteId =
+            null;
+        }
+      }
+
+
+      // ======================================================
+      // CREATE NETLIFY SITE IF NEEDED
+      // ======================================================
+
+      if (!netlifySiteId) {
+        const netlifySiteName =
+          createNetlifySiteName(
+            site_name ||
+              website.name,
+            website.id
+          );
+
+
+        console.log(
+          "Creating new Netlify site..."
+        );
+
+
+        console.log(
+          "Netlify site name:",
+          netlifySiteName
+        );
+
+
+        const createSiteResponse =
+          await fetch(
+            "https://api.netlify.com/api/v1/sites",
+            {
+              method: "POST",
+
+              headers: {
+                Authorization:
+                  `Bearer ${process.env.NETLIFY_AUTH_TOKEN}`,
+
+                "Content-Type":
+                  "application/json",
+
+                Accept:
+                  "application/json",
+              },
+
+              body: JSON.stringify({
+                name:
+                  netlifySiteName,
+              }),
+            }
+          );
+
+
+        const createSiteText =
+          await createSiteResponse.text();
+
+
+        let createSiteData =
+          null;
+
+
+        try {
+          createSiteData =
+            createSiteText
+              ? JSON.parse(
+                  createSiteText
+                )
+              : null;
+        } catch {
+          createSiteData =
+            null;
+        }
+
+
+        if (
+          !createSiteResponse.ok
+        ) {
+          console.error(
+            "Netlify site creation failed:"
+          );
+
+          console.error(
+            "Status:",
+            createSiteResponse.status
+          );
+
+          console.error(
+            "Response:",
+            createSiteText
+          );
+
+
+          return res.status(502).json({
+            success: false,
+            error:
+              createSiteData?.message ||
+              createSiteData?.error ||
+              "Netlify site creation failed.",
+          });
+        }
+
+
+        netlifySite =
+          createSiteData;
+
+
+        netlifySiteId =
+          netlifySite?.id ||
+          null;
+
+
+        if (!netlifySiteId) {
+          console.error(
+            "Netlify created the site but returned no site ID."
+          );
+
+
+          return res.status(502).json({
+            success: false,
+            error:
+              "Netlify created the site but did not return a site ID.",
+          });
+        }
+
+
+        console.log(
+          "New Netlify site created:"
+        );
+
+        console.log(
+          "Site ID:",
+          netlifySiteId
+        );
+
+        console.log(
+          "Site URL:",
+          netlifySite?.ssl_url ||
+            netlifySite?.url ||
+            "not available"
+        );
+      }
+
+
+      // ======================================================
+      // DEPLOY ZIP TO NETLIFY
+      // ======================================================
+
+      console.log(
+        "Deploying website to Netlify..."
+      );
+
+
+      console.log(
+        "Netlify site ID:",
         netlifySiteId
       );
 
-      const siteResponse = await fetch(
-        `https://api.netlify.com/api/v1/sites/${encodeURIComponent(
-          netlifySiteId
-        )}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: Bearer `${process.env.NETLIFY_AUTH_TOKEN}`,
-            Accept: "application/json",
-          },
-        }
-      );
 
-      if (siteResponse.ok) {
-        netlifySite =
-          await siteResponse.json();
-      } else {
-        console.warn(
-          "Existing Netlify site could not be loaded. A new site will be created."
-        );
-
-        netlifySiteId = null;
-      }
-    }
-
-    /* =========================
-       CREATE NEW NETLIFY SITE
-       ========================= */
-
-    if (!netlifySiteId) {
-      const netlifySiteName =
-        createNetlifySiteName(
-          site_name || website.name,
-          website.id
-        );
-
-      console.log(
-        "Creating new Netlify site:",
-        netlifySiteName
-      );
-
-      const createSiteResponse =
+      const deployResponse =
         await fetch(
-          "https://api.netlify.com/api/v1/sites",
+          `https://api.netlify.com/api/v1/sites/${encodeURIComponent(
+            netlifySiteId
+          )}/deploys`,
           {
             method: "POST",
+
             headers: {
-              Authorization: Bearer `${process.env.NETLIFY_AUTH_TOKEN}`,
+              Authorization:
+                `Bearer ${process.env.NETLIFY_AUTH_TOKEN}`,
+
               "Content-Type":
+                "application/zip",
+
+              Accept:
                 "application/json",
-              Accept: "application/json",
             },
-            body: JSON.stringify({
-              name: netlifySiteName,
-            }),
+
+            body: zipBuffer,
           }
         );
 
-      const createSiteText =
-        await createSiteResponse.text();
 
-      let createSiteData = null;
+      const deployText =
+        await deployResponse.text();
+
+
+      let deployData =
+        null;
+
 
       try {
-        createSiteData =
-          createSiteText
-            ? JSON.parse(createSiteText)
+        deployData =
+          deployText
+            ? JSON.parse(
+                deployText
+              )
             : null;
       } catch {
-        createSiteData = null;
+        deployData =
+          null;
       }
 
-      if (!createSiteResponse.ok) {
+
+      // ======================================================
+      // DEPLOYMENT ERROR
+      // ======================================================
+
+      if (
+        !deployResponse.ok
+      ) {
         console.error(
-          "Netlify site creation failed:",
-          createSiteResponse.status,
-          createSiteText
+          "Netlify deployment failed."
         );
 
+
+        console.error(
+          "Status:",
+          deployResponse.status
+        );
+
+
+        console.error(
+          "Response:",
+          deployText
+        );
+
+
         return res.status(502).json({
           success: false,
           error:
-            createSiteData?.message ||
-            "Netlify site creation failed.",
+            deployData?.message ||
+            deployData?.error ||
+            "Netlify deployment failed.",
         });
       }
 
-      netlifySite =
-        createSiteData;
-
-      netlifySiteId =
-        netlifySite?.id || null;
-
-      if (!netlifySiteId) {
-        return res.status(502).json({
-          success: false,
-          error:
-            "Netlify created the site but did not return a site ID.",
-        });
-      }
 
       console.log(
-        "Netlify site created:",
+        "Netlify deployment request accepted."
+      );
+
+
+      console.log(
+        "Deploy ID:",
+        deployData?.id ||
+          "not returned"
+      );
+
+
+      console.log(
+        "Deploy state:",
+        deployData?.state ||
+          "unknown"
+      );
+
+
+      // ======================================================
+      // GET PUBLISHED URL
+      // ======================================================
+
+      const publishedUrl =
+        deployData?.ssl_url ||
+        deployData?.url ||
+        deployData?.deploy_url ||
+        netlifySite?.ssl_url ||
+        netlifySite?.url ||
+        "";
+
+
+      if (!publishedUrl) {
+        console.error(
+          "Netlify deployment succeeded but no URL was returned."
+        );
+
+
+        return res.status(502).json({
+          success: false,
+          error:
+            "Website was deployed, but Netlify did not return a published URL.",
+
+          netlify_site_id:
+            netlifySiteId,
+
+          deploy_id:
+            deployData?.id ||
+            null,
+        });
+      }
+
+
+      console.log(
+        "Published URL:",
+        publishedUrl
+      );
+
+
+      // ======================================================
+      // SAVE NETLIFY INFORMATION TO SUPABASE
+      // ======================================================
+
+      console.log(
+        "Saving Netlify information to database..."
+      );
+
+
+      const {
+        data: updatedWebsite,
+        error: updateWebsiteError,
+      } =
+        await websiteGeneratorAdmin
+          .from("websites")
+          .update({
+            published_url:
+              publishedUrl,
+
+            netlify_site_id:
+              netlifySiteId,
+
+            updated_at:
+              new Date().toISOString(),
+          })
+          .eq(
+            "id",
+            website_id
+          )
+          .select(
+            `
+              id,
+              name,
+              published_url,
+              netlify_site_id
+            `
+          )
+          .single();
+
+
+      if (updateWebsiteError) {
+        console.error(
+          "Could not save Netlify information:"
+        );
+
+
+        console.error(
+          updateWebsiteError
+        );
+
+
+        return res.status(500).json({
+          success: false,
+
+          error:
+            "Website was deployed, but the published URL could not be saved.",
+
+          published_url:
+            publishedUrl,
+
+          netlify_site_id:
+            netlifySiteId,
+        });
+      }
+
+
+      // ======================================================
+      // SUCCESS
+      // ======================================================
+
+      console.log(
+        "================================================"
+      );
+
+      console.log(
+        "WEBSITE SUCCESSFULLY PUBLISHED"
+      );
+
+      console.log(
+        "Website:",
+        website.name
+      );
+
+      console.log(
+        "Netlify Site ID:",
         netlifySiteId
       );
-    }
 
-    /* =========================
-       DEPLOY ZIP TO NETLIFY
-       ========================= */
-
-    console.log(
-      "Deploying website to Netlify:",
-      netlifySiteId
-    );
-
-    const deployResponse =
-      await fetch(
-        `https://api.netlify.com/api/v1/sites/${encodeURIComponent(
-          netlifySiteId
-        )}/deploys`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: Bearer `${process.env.NETLIFY_AUTH_TOKEN}`,
-            "Content-Type": "application/zip",
-            Accept: "application/json",
-          },
-          body: zipBuffer,
-        }
+      console.log(
+        "Published URL:",
+        publishedUrl
       );
 
-    const deployText =
-      await deployResponse.text();
-
-    let deployData = null;
-
-    try {
-      deployData = deployText
-        ? JSON.parse(deployText)
-        : null;
-    } catch {
-      deployData = null;
-    }
-
-    if (!deployResponse.ok) {
-      console.error(
-        "Netlify deployment failed:",
-        deployResponse.status,
-        deployText
+      console.log(
+        "Deploy ID:",
+        deployData?.id ||
+          null
       );
 
-      return res.status(502).json({
-        success: false,
-        error:
-          deployData?.message ||
-          "Netlify deployment failed.",
+      console.log(
+        "================================================"
+      );
+
+
+      return res.json({
+        success: true,
+
+        message:
+          "Website published successfully.",
+
+        website:
+          updatedWebsite,
+
+        published_url:
+          publishedUrl,
+
+        netlify_site_id:
+          netlifySiteId,
+
+        deploy_id:
+          deployData?.id ||
+          null,
+
+        deploy_state:
+          deployData?.state ||
+          null,
       });
-    }
-
-    /* =========================
-       GET PUBLISHED URL
-       ========================= */
-
-    const publishedUrl =
-      deployData?.ssl_url ||
-      deployData?.url ||
-      netlifySite?.ssl_url ||
-      netlifySite?.url ||
-      "";
-
-    if (!publishedUrl) {
+    } catch (error) {
       console.error(
-        "Netlify deployment succeeded but no URL was returned."
+        "================================================"
       );
 
-      return res.status(502).json({
-        success: false,
-        error:
-          "Website was deployed, but Netlify did not return a published URL.",
-      });
-    }
-
-    /* =========================
-       SAVE NETLIFY INFORMATION
-       ========================= */
-
-    const {
-      data: updatedWebsite,
-      error: updateWebsiteError,
-    } = await websiteGeneratorAdmin
-      .from("websites")
-      .update({
-        published_url: publishedUrl,
-        netlify_site_id: netlifySiteId,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", website_id)
-      .select(
-        "id, name, published_url, netlify_site_id"
-      )
-      .single();
-
-    if (updateWebsiteError) {
       console.error(
-        "Could not save Netlify information:",
-        updateWebsiteError
+        "PUBLISH WEBSITE TO NETLIFY ERROR"
       );
+
+      console.error(
+        error
+      );
+
+      console.error(
+        "================================================"
+      );
+
 
       return res.status(500).json({
         success: false,
+
         error:
-          "Website was deployed, but the published URL could not be saved.",
-        published_url: publishedUrl,
-        netlify_site_id: netlifySiteId,
+          error?.message ||
+          "Unexpected error while publishing website.",
       });
     }
-
-    /* =========================
-       SUCCESS
-       ========================= */
-
-    console.log(
-      "Website successfully published:",
-      publishedUrl
-    );
-
-    return res.json({
-      success: true,
-      message:
-        "Website published successfully.",
-      website: updatedWebsite,
-      published_url: publishedUrl,
-      netlify_site_id: netlifySiteId,
-      deploy_id: deployData?.id || null,
-    });
-  } catch (error) {
-    console.error(
-      "Publish website to Netlify error:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      error:
-        error?.message ||
-        "Unexpected error while publishing website.",
-    });
   }
-});
-
+);
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
 app.get("/", (req, res) => {
   res.send("Nasara upload server running 🚀");
