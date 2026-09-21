@@ -2815,7 +2815,7 @@ app.use("/restaurant", restaurantRoutes);
 
 function createNetlifyZip(html) {
   return new Promise((resolve, reject) => {
-    const archive = Archiver.create("zip", { zlib: { level: 9 }, });
+    const archive = archiver.create("zip", { zlib: { level: 9 }, });
 
     const chunks = [];
 
