@@ -1,6 +1,8 @@
 const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
+const fs = require("fs");
+const path = require("path");
 const AWS = require("aws-sdk");
 const PDFDocument = require("pdfkit");
 require("dotenv").config();
@@ -2834,18 +2836,74 @@ function createNetlifySiteName(siteName, websiteId) {
 // CREATE NETLIFY ZIP
 // ============================================================
 
-function createNetlifyZip(html) {
+function createNetlifyZip(
+  html,
+  loginHtml,
+  customerDashboardHtml
+) {
   try {
-    console.log("Creating Netlify ZIP using ADM-ZIP...");
+    console.log(
+      "Creating Netlify ZIP using ADM-ZIP..."
+    );
 
     const zip = new AdmZip();
 
+    // ==========================================
+    // MAIN CUSTOMER WEBSITE
+    // ==========================================
+
     zip.addFile(
       "index.html",
-      Buffer.from(html, "utf8")
+      Buffer.from(
+        html,
+        "utf8"
+      )
     );
 
-    const zipBuffer = zip.toBuffer();
+    // ==========================================
+    // CUSTOMER LOGIN PAGE
+    // ==========================================
+
+    if (
+      loginHtml &&
+      typeof loginHtml === "string"
+    ) {
+      zip.addFile(
+        "login.html",
+        Buffer.from(
+          loginHtml,
+          "utf8"
+        )
+      );
+
+      console.log(
+        "Added login.html to Netlify ZIP."
+      );
+    }
+
+    // ==========================================
+    // CUSTOMER DASHBOARD
+    // ==========================================
+
+    if (
+      customerDashboardHtml &&
+      typeof customerDashboardHtml === "string"
+    ) {
+      zip.addFile(
+        "customer-dashboard.html",
+        Buffer.from(
+          customerDashboardHtml,
+          "utf8"
+        )
+      );
+
+      console.log(
+        "Added customer-dashboard.html to Netlify ZIP."
+      );
+    }
+
+    const zipBuffer =
+      zip.toBuffer();
 
     console.log(
       "Netlify ZIP created successfully."
@@ -2858,7 +2916,9 @@ function createNetlifyZip(html) {
     );
 
     return zipBuffer;
+
   } catch (error) {
+
     console.error(
       "Failed to create Netlify ZIP:",
       error
@@ -2867,7 +2927,6 @@ function createNetlifyZip(html) {
     throw error;
   }
 }
-
 
 // ============================================================
 // PUBLISH WEBSITE TO NETLIFY
@@ -3041,12 +3100,12 @@ app.post(
       // ======================================================
 
       const {
-        website_id,
-        site_name,
-        html,
-      } = req.body || {};
-
-
+  website_id,
+  site_name,
+  html,
+  login_html,
+  customer_dashboard_html,
+} = req.body || {};
       console.log(
         "Website ID:",
         website_id
@@ -3081,7 +3140,26 @@ app.post(
             "Generated HTML is required.",
         });
       }
+      if (
+  !login_html ||
+  typeof login_html !== "string"
+) {
+  return res.status(400).json({
+    success: false,
+    error: "Customer login HTML is required.",
+  });
+}
 
+if (
+  !customer_dashboard_html ||
+  typeof customer_dashboard_html !== "string"
+) {
+  return res.status(400).json({
+    success: false,
+    error:
+      "Customer dashboard HTML is required.",
+  });
+}
 
       if (
         html.length >
@@ -3172,9 +3250,11 @@ app.post(
 
 
       const zipBuffer =
-        await createNetlifyZip(
-          html
-        );
+  await createNetlifyZip(
+    html,
+    login_html,
+    customer_dashboard_html
+  );
 
 
       console.log(
