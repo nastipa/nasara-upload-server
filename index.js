@@ -9,10 +9,7 @@ const restaurantRoutes = require("./routes/restaurant");
 
 const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
-const archiverModule = require("archiver");
-const archiver =
-  archiverModule.default ||
-  archiverModule;
+const archiver = require("archiver");
 const notifyUser = require("./services/notifyUser");
 
 const app = express();
@@ -2818,9 +2815,7 @@ app.use("/restaurant", restaurantRoutes);
 
 function createNetlifyZip(html) {
   return new Promise((resolve, reject) => {
-    const archive = archiver("zip", {
-      zlib: { level: 9 },
-    });
+    const archive = Archiver.create("zip", { zlib: { level: 9 }, });
 
     const chunks = [];
 
