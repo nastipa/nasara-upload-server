@@ -3434,7 +3434,20 @@ app.post(
         "Netlify site ID:",
         netlifySiteId
       );
+      console.log(
+  "ZIP first bytes:",
+  zipBuffer.subarray(0, 10).toString("hex")
+);
 
+console.log(
+  "ZIP is Buffer:",
+  Buffer.isBuffer(zipBuffer)
+);
+
+console.log(
+  "ZIP byte length:",
+  zipBuffer.length
+);
 
       const deployResponse =
         await fetch(
