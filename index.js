@@ -13,7 +13,10 @@ const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
 const AdmZip = require("adm-zip");
 const notifyUser = require("./services/notifyUser");
-
+const {
+sendBrowserPushToUser,
+broadcastBrowserPush,
+} = require("./browserPush");
 const app = express();
 app.use(cors());
 app.use(
@@ -2768,6 +2771,201 @@ app.get("/quotation-pdf/:id", async (req, res) => {
   } catch (err) {
     console.log(err);
     res.status(500).json({ error: "PDF generation failed" });
+  }
+});
+
+/* ================= SEND BROWSER NOTIFICATION TO LOGGED-IN USER ================= */
+
+app.post("/browser-push/send-me", async (req, res) => {
+  try {
+    const authorization = req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication is required.",
+      });
+    }
+
+    const token = authorization.slice(7).trim();
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid authentication token.",
+      });
+    }
+
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Your session is invalid or has expired.",
+      });
+    }
+
+    const { title, body, url } = req.body || {};
+
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof body !== "string" ||
+      !body.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "A notification title and body are required.",
+      });
+    }
+
+    if (title.length > 120 || body.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: "The notification title or body is too long.",
+      });
+    }
+
+    const notificationUrl =
+      typeof url === "string" &&
+      url.startsWith("/") &&
+      !url.startsWith("//")
+        ? url
+        : "/";
+
+    const result = await sendBrowserPushToUser(
+      authData.user.id,
+      title.trim(),
+      body.trim(),
+      notificationUrl
+    );
+
+    return res.json({
+      success: result.success,
+      sent: result.sent,
+      failed: result.failed || 0,
+      message:
+        result.message || "Browser notification processed.",
+    });
+  } catch (error) {
+    console.error("SEND BROWSER PUSH ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Could not send the browser notification.",
+    });
+  }
+});
+
+/* ================= BROADCAST BROWSER NOTIFICATION TO ALL USERS ================= */
+
+app.post("/browser-push/broadcast", async (req, res) => {
+  try {
+    const authorization = req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication is required.",
+      });
+    }
+
+    const token = authorization.slice(7).trim();
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid authentication token.",
+      });
+    }
+
+    const { data: authData, error: authError } =
+      await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Your session is invalid or has expired.",
+      });
+    }
+
+    /* ================= VERIFY NASARA ADMIN ================= */
+
+    const { data: admin, error: adminError } =
+      await supabaseAdmin
+        .from("admins")
+        .select("user_id")
+        .eq("user_id", authData.user.id)
+        .maybeSingle();
+
+    if (adminError) {
+      console.error("BROWSER PUSH ADMIN CHECK ERROR:", adminError);
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not verify administrator permissions.",
+      });
+    }
+
+    if (!admin) {
+      return res.status(403).json({
+        success: false,
+        error: "Only authorized Nasara administrators can broadcast notifications.",
+      });
+    }
+
+    /* ================= VALIDATE NOTIFICATION ================= */
+
+    const { title, body, url } = req.body || {};
+
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof body !== "string" ||
+      !body.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "A notification title and body are required.",
+      });
+    }
+
+    if (title.length > 120 || body.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: "The notification title or body is too long.",
+      });
+    }
+
+    const notificationUrl =
+      typeof url === "string" &&
+      url.startsWith("/") &&
+      !url.startsWith("//")
+        ? url
+        : "/";
+
+    /* ================= SEND BROADCAST ================= */
+
+    const result = await broadcastBrowserPush(
+      title.trim(),
+      body.trim(),
+      notificationUrl
+    );
+
+    return res.json({
+      success: result.success,
+      sent: result.sent,
+      failed: result.failed,
+      message: "Browser notification broadcast processed.",
+    });
+  } catch (error) {
+    console.error("BROWSER PUSH BROADCAST ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Could not broadcast browser notifications.",
+    });
   }
 });
 
