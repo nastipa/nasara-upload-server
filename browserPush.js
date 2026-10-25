@@ -130,21 +130,30 @@ async function sendBrowserPushToUser(
 }
 
 // =====================================================
-// 4. SEND A BROWSER PUSH NOTIFICATION TO ALL SUBSCRIBERS
+// 4. SEND BROWSER PUSH TO ALL SUBSCRIBERS
+// EXCEPT THE USER WHO POSTED THE ITEM
 // =====================================================
 
 async function broadcastBrowserPush(
   title,
   body,
-  url = "/"
+  url = "/",
+  excludeUserId = null
 ) {
   if (!title || !body) {
     throw new Error("title and body are required.");
   }
 
-  const { data: subscriptions, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from("browser_push_subscriptions")
-    .select("id, subscription");
+    .select("id, user_id, subscription");
+
+  // Exclude the user who posted the item.
+  if (excludeUserId) {
+    query = query.neq("user_id", excludeUserId);
+  }
+
+  const { data: subscriptions, error } = await query;
 
   if (error) {
     throw new Error(
@@ -171,6 +180,7 @@ async function broadcastBrowserPush(
           title,
           body,
           url,
+          tag: `nasara-item-${Date.now()}`,
         })
       );
 
@@ -184,7 +194,11 @@ async function broadcastBrowserPush(
         error.message
       );
 
-      if (error.statusCode === 404 || error.statusCode === 410) {
+      // Remove expired browser subscriptions.
+      if (
+        error.statusCode === 404 ||
+        error.statusCode === 410
+      ) {
         const { error: deleteError } = await supabaseAdmin
           .from("browser_push_subscriptions")
           .delete()

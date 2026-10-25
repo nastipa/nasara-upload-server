@@ -2969,38 +2969,199 @@ app.post("/browser-push/broadcast", async (req, res) => {
   }
 });
 
-/* ================= PUSH ROUTE ================= */
+/* ================= SECURE ITEM PUSH NOTIFICATIONS ================= */
+
 app.post("/send-push", async (req, res) => {
   try {
-    const { title, body, type, ref_id } = req.body;
+    // =====================================================
+    // 1. VERIFY AUTHENTICATION
+    // =====================================================
 
-    const { data: users } = await supabaseAdmin
-      .from("profiles")
-      .select("push_token");
+    const authorization = req.headers.authorization || "";
 
-    const tokens = users
-      ?.map((u) => u.push_token)
-      .filter(Boolean);
-
-    if (!tokens || tokens.length === 0) {
-      return res.json({ success: true });
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication is required.",
+      });
     }
 
-    // 🔥 use helper
-   await sendPush(
-  tokens,
-  title,
-  body,
-  {
-    type,
-    ref_id,
-  }
-);
+    const token = authorization.slice(7).trim();
 
-    res.json({ success: true });
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ error: "Push failed" });
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid authentication token.",
+      });
+    }
+
+    const {
+      data: authData,
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Your session is invalid or has expired.",
+      });
+    }
+
+    const userId = authData.user.id;
+
+    // =====================================================
+    // 2. VALIDATE THE REQUEST
+    // =====================================================
+
+    const { title, body, type, ref_id } = req.body || {};
+
+    if (
+      typeof title !== "string" ||
+      !title.trim() ||
+      typeof body !== "string" ||
+      !body.trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "A notification title and body are required.",
+      });
+    }
+
+    if (title.length > 120 || body.length > 1000) {
+      return res.status(400).json({
+        success: false,
+        error: "The notification title or body is too long.",
+      });
+    }
+
+    // =====================================================
+    // 3. ACCEPT ONLY ITEM NOTIFICATIONS
+    // =====================================================
+
+    if (type !== "item" || !ref_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid item notification request.",
+      });
+    }
+
+    // =====================================================
+    // 4. VERIFY ITEM OWNERSHIP
+    // =====================================================
+
+    const {
+      data: item,
+      error: itemError,
+    } = await supabaseAdmin
+      .from("items_live")
+      .select("id, user_id, title")
+      .eq("id", ref_id)
+      .maybeSingle();
+
+    if (itemError) {
+      console.error(
+        "ITEM OWNERSHIP CHECK ERROR:",
+        itemError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not verify the item.",
+      });
+    }
+
+    if (!item || item.user_id !== userId) {
+      return res.status(403).json({
+        success: false,
+        error:
+          "You are not authorized to notify users about this item.",
+      });
+    }
+
+    // Use the verified item's actual title.
+    const notificationTitle = "🛒 New Item";
+
+    const notificationBody =
+      typeof item.title === "string" && item.title.trim()
+        ? item.title.trim().slice(0, 1000)
+        : body.trim();
+
+    // =====================================================
+    // 5. SEND EXISTING EXPO / NATIVE PUSH NOTIFICATIONS
+    // =====================================================
+
+    const {
+      data: users,
+      error: usersError,
+    } = await supabaseAdmin
+      .from("profiles")
+      .select("push_token")
+      .neq("id", userId);
+
+    if (usersError) {
+      console.error(
+        "EXPO PUSH TOKEN LOOKUP ERROR:",
+        usersError.message
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not retrieve notification recipients.",
+      });
+    }
+
+    const tokens = (users || [])
+      .map((user) => user.push_token)
+      .filter(Boolean);
+
+    if (tokens.length > 0) {
+      await sendPush(
+        tokens,
+        notificationTitle,
+        notificationBody,
+        {
+          type: "item",
+          ref_id: item.id,
+        }
+      );
+    }
+
+    // =====================================================
+    // 6. SEND BROWSER PUSH NOTIFICATIONS
+    // =====================================================
+
+    const itemUrl = `/item/${encodeURIComponent(item.id)}`;
+
+    const browserResult = await broadcastBrowserPush(
+      notificationTitle,
+      notificationBody,
+      itemUrl,
+      userId
+    );
+
+    console.log("ITEM PUSH RESULT:", {
+      itemId: item.id,
+      nativeRecipients: tokens.length,
+      browserResult,
+    });
+
+    // =====================================================
+    // 7. RETURN RESULT
+    // =====================================================
+
+    return res.json({
+      success: true,
+      nativeRecipients: tokens.length,
+      browser: browserResult,
+      message: "Item notifications processed.",
+    });
+  } catch (error) {
+    console.error("SECURE ITEM PUSH ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Could not process item notifications.",
+    });
   }
 });
 /* ================= HOSPITAL ROUTES ================= */
