@@ -2614,10 +2614,27 @@ app.post("/remove-constituency-admin", async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 });
-/* ================= SECURE DELETE ACCOUNT ================= */
+/* ======================================================
+   🟦 NASARA ACCOUNT DELETION
+   🟢 STEP 1: Verify user
+   🟣 STEP 2: Clean database
+   🟠 STEP 3: Delete authentication account
+   🔴 STEP 4: Log errors
+   ====================================================== */
+
 app.post("/delete-account", async (req, res) => {
   try {
-    const token = req.headers.authorization?.replace("Bearer ", "");
+    // 🔵 STEP 1: CHECK AUTHORIZATION
+
+    const authorization = req.headers.authorization;
+
+    if (!authorization?.startsWith("Bearer ")) {
+      return res.status(401).json({
+        error: "No valid authorization token provided",
+      });
+    }
+
+    const token = authorization.slice(7).trim();
 
     if (!token) {
       return res.status(401).json({
@@ -2625,51 +2642,88 @@ app.post("/delete-account", async (req, res) => {
       });
     }
 
-    const { data, error } =
+    // 🟣 STEP 2: VERIFY THE USER
+
+    const { data, error: userError } =
       await supabaseAdmin.auth.getUser(token);
 
-    if (error || !data?.user) {
+    if (userError || !data?.user) {
+      console.error("🔴 Authentication error:", {
+        message: userError?.message,
+        code: userError?.code,
+      });
+
       return res.status(401).json({
-        error: "Invalid token",
+        error: "Invalid or expired token",
       });
     }
 
     const userId = data.user.id;
 
-    // Clean up everything owned by the user
-    const { error: rpcError } =
-      await supabaseAdmin.rpc(
-        "delete_user_everything",
-        {
-          uid: userId,
-        }
-      );
+    console.log("🟠 Account deletion started");
+
+    // 🟣 STEP 3: RUN DATABASE CLEANUP
+
+    const { error: rpcError } = await supabaseAdmin.rpc(
+      "delete_user_everything",
+      {
+        uid: userId,
+      }
+    );
 
     if (rpcError) {
+      console.error("🔴 Database deletion error:", {
+        message: rpcError.message,
+        code: rpcError.code,
+        details: rpcError.details,
+        hint: rpcError.hint,
+      });
+
       return res.status(500).json({
-        error: rpcError.message,
+        error: "Database error deleting user",
+        details: rpcError.message,
+        code: rpcError.code,
+        hint: rpcError.hint,
       });
     }
 
-    // Delete Auth user last
+    // 🟢 STEP 4: DELETE THE AUTH ACCOUNT LAST
+
     const { error: authError } =
       await supabaseAdmin.auth.admin.deleteUser(userId);
 
     if (authError) {
+      console.error("🔴 Auth deletion error:", {
+        message: authError.message,
+        code: authError.code,
+      });
+
       return res.status(500).json({
-        error: authError.message,
+        error: "Database cleanup succeeded, but authentication deletion failed",
+        details: authError.message,
+        code: authError.code,
       });
     }
 
-    return res.json({
+    // 🟢 STEP 5: CONFIRM SUCCESS
+
+    console.log("🟢 Account deletion completed");
+
+    return res.status(200).json({
       success: true,
+      message: "Account deleted successfully",
     });
 
   } catch (err) {
-    console.log(err);
+    // 🔴 STEP 6: HANDLE UNEXPECTED ERRORS
+
+    console.error("🔴 Unexpected deletion error:", {
+      message: err?.message,
+      stack: err?.stack,
+    });
 
     return res.status(500).json({
-      error: err.message,
+      error: "Unexpected error deleting account",
     });
   }
 });
