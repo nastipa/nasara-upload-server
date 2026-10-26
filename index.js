@@ -2641,7 +2641,7 @@ app.post("/delete-account", async (req, res) => {
       await supabaseAdmin.rpc(
         "delete_user_everything",
         {
-          p_user_id: userId,
+          uid: userId,
         }
       );
 
