@@ -3218,6 +3218,133 @@ app.post("/send-push", async (req, res) => {
     });
   }
 });
+
+/* 🟣 =====================================================
+🎥 NASARA REEL WEBSITE BROWSER PUSH NOTIFICATIONS
+📁 File: index.js
+📍 Location: Immediately after the existing /send-push route
+===================================================== */
+
+/* 🟢 1. SECURE REEL BROWSER NOTIFICATION ENDPOINT */
+
+app.post("/reel-browser-push", async (req, res) => {
+try {
+/* 🔐 2. VERIFY USER AUTHENTICATION */
+
+const authorization = req.headers.authorization || "";
+if (!authorization.startsWith("Bearer ")) {
+  return res.status(401).json({
+    success: false,
+    error: "Authentication is required.",
+  });
+}
+const token = authorization.slice(7).trim();
+if (!token) {
+  return res.status(401).json({
+    success: false,
+    error: "Invalid authentication token.",
+  });
+}
+const {
+  data: authData,
+  error: authError,
+} = await supabaseAdmin.auth.getUser(token);
+if (authError || !authData?.user) {
+  return res.status(401).json({
+    success: false,
+    error: "Your session is invalid or has expired.",
+  });
+}
+const userId = authData.user.id;
+/* 🔵 3. VALIDATE THE REEL ID */
+const { ref_id } = req.body || {};
+if (
+  typeof ref_id !== "string" ||
+  !ref_id.trim() ||
+  ref_id.length > 200
+) {
+  return res.status(400).json({
+    success: false,
+    error: "A valid Reel ID is required.",
+  });
+}
+/* 🟣 4. VERIFY THAT THE REEL BELONGS TO THE USER */
+const {
+  data: reel,
+  error: reelError,
+} = await supabaseAdmin
+  .from("posts")
+  .select("id, user_id, caption, status")
+  .eq("id", ref_id)
+  .maybeSingle();
+if (reelError) {
+  console.error(
+    "🎥 REEL LOOKUP ERROR:",
+    reelError
+  );
+  return res.status(500).json({
+    success: false,
+    error: "Could not verify the Reel.",
+  });
+}
+if (!reel || reel.user_id !== userId) {
+  return res.status(403).json({
+    success: false,
+    error:
+      "You are not authorized to notify users about this Reel.",
+  });
+}
+/* 🟠 5. ENSURE THE REEL IS READY */
+if (reel.status !== "ready") {
+  return res.status(400).json({
+    success: false,
+    error: "This Reel is not ready to be published.",
+  });
+}
+/* 🟡 6. PREPARE THE BROWSER NOTIFICATION */
+const notificationTitle = "🎥 New Reel";
+const notificationBody =
+  typeof reel.caption === "string" &&
+  reel.caption.trim()
+    ? reel.caption.trim().slice(0, 200)
+    : "A new Reel has been posted on Nasara.";
+/* 🟢 7. SEND WEBSITE BROWSER PUSH NOTIFICATIONS */
+// Notify subscribed browser users.
+// Exclude the person who posted the Reel.
+// Do not send native app notifications here.
+const browserResult = await broadcastBrowserPush(
+  notificationTitle,
+  notificationBody,
+  "/reels",
+  userId
+);
+console.log("🎥 REEL BROWSER PUSH RESULT:", {
+  reelId: reel.id,
+  browserResult,
+});
+/* 🔵 8. RETURN THE RESULT */
+return res.json({
+  success: true,
+  browser: browserResult,
+  message:
+    "Reel browser notifications processed.",
+});
+
+} catch (error) {
+/* 🔴 9. HANDLE ERRORS */
+
+console.error(
+  "🎥 REEL BROWSER PUSH ERROR:",
+  error
+);
+return res.status(500).json({
+  success: false,
+  error:
+    "Could not process Reel browser notifications.",
+});
+
+}
+});
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
