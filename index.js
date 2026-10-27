@@ -3345,6 +3345,165 @@ return res.status(500).json({
 
 }
 });
+
+/* 🟣 =====================================================
+💬 NASARA CHAT WEBSITE BROWSER PUSH NOTIFICATIONS
+📁 FILE: index.js
+📍 ADD AFTER THE /reel-browser-push ROUTE
+===================================================== */
+
+app.post("/chat-browser-push", async (req, res) => {
+try {
+/* 🔵 1. VERIFY THE SENDER’S AUTHENTICATION */
+
+const authorization = req.headers.authorization || "";
+if (!authorization.startsWith("Bearer ")) {
+  return res.status(401).json({
+    success: false,
+    error: "Authentication is required.",
+  });
+}
+const token = authorization.slice(7).trim();
+if (!token) {
+  return res.status(401).json({
+    success: false,
+    error: "Invalid authentication token.",
+  });
+}
+const {
+  data: authData,
+  error: authError,
+} = await supabaseAdmin.auth.getUser(token);
+if (authError || !authData?.user) {
+  return res.status(401).json({
+    success: false,
+    error: "Your session is invalid or has expired.",
+  });
+}
+const senderId = authData.user.id;
+/* 🟣 2. VALIDATE THE REQUEST */
+const { message_id, recipient_id } = req.body || {};
+/* 🟣 VALIDATE MESSAGE AND RECIPIENT IDs */
+
+if (
+  !(
+    typeof message_id === "string" ||
+    (typeof message_id === "number" &&
+      Number.isFinite(message_id))
+  ) ||
+  String(message_id).trim() === "" ||
+  typeof recipient_id !== "string" ||
+  !recipient_id.trim()
+) {
+  return res.status(400).json({
+    success: false,
+    error: "A valid message ID and recipient ID are required.",
+  });
+}
+if (senderId === recipient_id) {
+  return res.status(400).json({
+    success: false,
+    error: "You cannot send a chat notification to yourself.",
+  });
+}
+/* 🟠 3. VERIFY THAT THE MESSAGE EXISTS AND BELONGS TO THE SENDER */
+const {
+  data: message,
+  error: messageError,
+} = await supabaseAdmin
+  .from("messages")
+  .select("id, sender_id, room_id, text")
+  .eq("id", message_id)
+  .maybeSingle();
+if (messageError) {
+  console.error("🔴 CHAT MESSAGE LOOKUP ERROR:", messageError);
+  return res.status(500).json({
+    success: false,
+    error: "Could not verify the chat message.",
+  });
+}
+if (!message || message.sender_id !== senderId) {
+  return res.status(403).json({
+    success: false,
+    error: "You are not authorized to notify users about this message.",
+  });
+}
+if (!message.room_id) {
+  return res.status(400).json({
+    success: false,
+    error: "The message does not have a valid chat room.",
+  });
+}
+/* 🟡 4. VERIFY THE RECIPIENT BELONGS TO THE SAME CHAT ROOM */
+const {
+  data: participants,
+  error: participantsError,
+} = await supabaseAdmin
+  .from("chat_participants")
+  .select("user_id")
+  .eq("room_id", message.room_id)
+  .in("user_id", [senderId, recipient_id]);
+if (participantsError) {
+  console.error(
+    "🔴 CHAT PARTICIPANT LOOKUP ERROR:",
+    participantsError
+  );
+  return res.status(500).json({
+    success: false,
+    error: "Could not verify the chat participants.",
+  });
+}
+const participantIds = new Set(
+  (participants || []).map((participant) => participant.user_id)
+);
+if (
+  !participantIds.has(senderId) ||
+  !participantIds.has(recipient_id)
+) {
+  return res.status(403).json({
+    success: false,
+    error: "The sender and recipient must belong to the same chat room.",
+  });
+}
+/* 🟢 5. PREPARE THE BROWSER NOTIFICATION */
+const notificationTitle = "💬 New Chat Message";
+/* 🟢 PREPARE THE NOTIFICATION MESSAGE */
+
+const notificationBody =
+  typeof message.text === "string" && message.text.trim()
+    ? message.text.trim().slice(0, 160)
+    : "You have received a new message on Nasara.";
+/* 🔵 6. SEND ONLY TO THE RECIPIENT'S WEBSITE BROWSERS */
+const browserResult = await sendBrowserPushToUser(
+  recipient_id,
+  notificationTitle,
+  notificationBody,
+  `/chat/${message.room_id}`
+);
+/* 🟢 7. LOG THE RESULT */
+console.log("💬 CHAT BROWSER PUSH RESULT:", {
+  messageId: message.id,
+  recipientId: recipient_id,
+  browserResult,
+});
+/* 🟢 8. RETURN SUCCESS */
+return res.json({
+  success: true,
+  browser: browserResult,
+  message: "Chat browser notification processed.",
+});
+
+} catch (error) {
+/* 🔴 9. HANDLE UNEXPECTED ERRORS */
+
+console.error("💬 CHAT BROWSER PUSH ERROR:", error);
+return res.status(500).json({
+  success: false,
+  error: "Could not process the chat browser notification.",
+});
+
+}
+});
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
