@@ -3441,37 +3441,69 @@ if (!message.room_id) {
     error: "The message does not have a valid chat room.",
   });
 }
-/* 🟡 4. VERIFY THE RECIPIENT BELONGS TO THE SAME CHAT ROOM */
+/* 🟡 4. VERIFY THE SENDER AND RECIPIENT BELONG TO THE SAME CHAT ROOM */
+
+// 🟢 Load the actual chat room participants from chat_rooms
 const {
-  data: participants,
-  error: participantsError,
+  data: room,
+  error: roomError,
 } = await supabaseAdmin
-  .from("chat_participants")
-  .select("user_id")
-  .eq("room_id", message.room_id)
-  .in("user_id", [senderId, recipient_id]);
-if (participantsError) {
-  console.error(
-    "🔴 CHAT PARTICIPANT LOOKUP ERROR:",
-    participantsError
-  );
+  .from("chat_rooms")
+  .select("id, buyer_id, seller_id")
+  .eq("id", message.room_id)
+  .maybeSingle();
+
+// 🔴 Handle room lookup errors
+if (roomError) {
+  console.error("🔴 CHAT ROOM LOOKUP ERROR:", roomError);
+
   return res.status(500).json({
     success: false,
-    error: "Could not verify the chat participants.",
+    error: "Could not verify the chat room.",
   });
 }
-const participantIds = new Set(
-  (participants || []).map((participant) => participant.user_id)
-);
-if (
-  !participantIds.has(senderId) ||
-  !participantIds.has(recipient_id)
-) {
+
+// 🔴 Ensure the room exists
+if (!room) {
+  return res.status(403).json({
+    success: false,
+    error: "The chat room could not be verified.",
+  });
+}
+
+// 🟢 Confirm that the authenticated sender belongs to this room
+const senderBelongsToRoom =
+  room.buyer_id === senderId ||
+  room.seller_id === senderId;
+
+// 🟢 Confirm that the intended recipient is the other participant
+const recipientBelongsToRoom =
+  (room.buyer_id === senderId &&
+    room.seller_id === recipient_id) ||
+  (room.seller_id === senderId &&
+    room.buyer_id === recipient_id);
+
+// 🔴 Reject requests that do not match the room's buyer and seller
+if (!senderBelongsToRoom || !recipientBelongsToRoom) {
+  console.error("🔴 CHAT ROOM PARTICIPANT VALIDATION FAILED:", {
+    roomId: message.room_id,
+    senderId,
+    recipientId: recipient_id,
+    buyerId: room.buyer_id,
+    sellerId: room.seller_id,
+  });
+
   return res.status(403).json({
     success: false,
     error: "The sender and recipient must belong to the same chat room.",
   });
 }
+
+console.log("🟢 CHAT ROOM PARTICIPANTS VERIFIED:", {
+  roomId: room.id,
+  senderId,
+  recipientId: recipient_id,
+});
 /* 🟢 5. PREPARE THE BROWSER NOTIFICATION */
 const notificationTitle = "💬 New Chat Message";
 /* 🟢 PREPARE THE NOTIFICATION MESSAGE */
