@@ -2912,6 +2912,114 @@ app.post("/browser-push/send-me", async (req, res) => {
   }
 });
 
+// =====================================================
+// 🟢 NASARA — REGISTER / TRANSFER BROWSER PUSH SUBSCRIPTION
+// Route: POST /browser-push/register-subscription
+// File: index.js
+// =====================================================
+
+app.post("/browser-push/register-subscription", async (req, res) => {
+try {
+// 🔐 STEP 1: Read the authenticated user’s access token.
+const authorization = req.headers.authorization || "";
+
+if (!authorization.startsWith("Bearer ")) {
+  return res.status(401).json({
+    success: false,
+    error: "Authentication is required.",
+  });
+}
+const token = authorization.slice(7).trim();
+if (!token) {
+  return res.status(401).json({
+    success: false,
+    error: "Invalid authentication token.",
+  });
+}
+// 🔐 STEP 2: Verify the token with Supabase.
+// Never trust a user_id supplied by the browser.
+const {
+  data: authData,
+  error: authError,
+} = await supabaseAdmin.auth.getUser(token);
+if (authError || !authData?.user) {
+  return res.status(401).json({
+    success: false,
+    error: "Your session is invalid or has expired.",
+  });
+}
+const authenticatedUserId = authData.user.id;
+// 📦 STEP 3: Read the browser subscription.
+const { subscription } = req.body || {};
+if (
+  !subscription ||
+  typeof subscription !== "object" ||
+  typeof subscription.endpoint !== "string" ||
+  !subscription.endpoint.startsWith("https://") ||
+  !subscription.keys ||
+  typeof subscription.keys.p256dh !== "string" ||
+  !subscription.keys.p256dh.trim() ||
+  typeof subscription.keys.auth !== "string" ||
+  !subscription.keys.auth.trim()
+) {
+  return res.status(400).json({
+    success: false,
+    error: "A valid browser push subscription is required.",
+  });
+}
+// 🕒 STEP 4: Save the subscription for the authenticated account.
+//
+// If this browser endpoint already belongs to another Nasara
+// account, the existing row is reassigned to the current account.
+//
+// The unique endpoint constraint prevents duplicate endpoint rows.
+// The service-role client is used only on the trusted backend.
+const { data: savedSubscription, error: saveError } =
+  await supabaseAdmin
+    .from("browser_push_subscriptions")
+    .upsert(
+      {
+        user_id: authenticatedUserId,
+        endpoint: subscription.endpoint,
+        subscription,
+        updated_at: new Date().toISOString(),
+      },
+      {
+        onConflict: "endpoint",
+      }
+    )
+    .select("id")
+    .single();
+if (saveError) {
+  console.error(
+    "REGISTER BROWSER PUSH SUBSCRIPTION ERROR:",
+    saveError
+  );
+  return res.status(500).json({
+    success: false,
+    error: "Could not save the browser notification subscription.",
+  });
+}
+// ✅ STEP 5: Return success.
+return res.json({
+  success: true,
+  message: "Browser notification subscription registered successfully.",
+  subscriptionId: savedSubscription?.id ?? null,
+});
+
+} catch (error) {
+console.error(
+"REGISTER BROWSER PUSH SUBSCRIPTION ERROR:",
+error
+);
+
+return res.status(500).json({
+  success: false,
+  error: "An unexpected error occurred while registering notifications.",
+});
+
+}
+});
 /* ================= BROADCAST BROWSER NOTIFICATION TO ALL USERS ================= */
 
 app.post("/browser-push/broadcast", async (req, res) => {
