@@ -3353,6 +3353,13 @@ return res.status(500).json({
 ===================================================== */
 
 app.post("/chat-browser-push", async (req, res) => {
+  /* 🟣 DIAGNOSTIC: CONFIRM THE CHAT ROUTE IS REACHED */
+console.log("💬 CHAT BROWSER PUSH ROUTE HIT:", {
+  method: req.method,
+  path: req.originalUrl,
+  hasAuthorization: Boolean(req.headers.authorization),
+  body: req.body,
+});
 try {
 /* 🔵 1. VERIFY THE SENDER’S AUTHENTICATION */
 
