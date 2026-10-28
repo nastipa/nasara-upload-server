@@ -3551,6 +3551,200 @@ return res.status(500).json({
 
 }
 });
+
+
+// ============================================================
+// 🟢 RESTAURANT NOTIFICATIONS — NEW ORDER
+// Notifies the restaurant owner when a customer places an order.
+// ============================================================
+
+app.post("/restaurant/notify-new-order", async (req, res) => {
+  try {
+    // 🟢 1. Verify the authenticated customer
+    const authorization = req.headers.authorization;
+
+    if (!authorization || !authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    const accessToken = authorization.substring(7);
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (authError || !user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid authentication.",
+      });
+    }
+
+    // 🟢 2. Validate the order ID
+    const { orderId } = req.body;
+
+    if (!orderId) {
+      return res.status(400).json({
+        success: false,
+        message: "Order ID is required.",
+      });
+    }
+
+    // 🟢 3. Retrieve the order
+    const { data: order, error: orderError } = await supabaseAdmin
+      .from("food_orders")
+      .select(
+        "id, order_number, customer_id, restaurant_id, total_amount, order_status"
+      )
+      .eq("id", orderId)
+      .maybeSingle();
+
+    if (orderError) {
+      console.error("Restaurant notification order lookup failed:", orderError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Could not verify the order.",
+      });
+    }
+
+    if (!order) {
+      return res.status(404).json({
+        success: false,
+        message: "Order not found.",
+      });
+    }
+
+    // 🟢 4. Only the customer who created the order can trigger this.
+    if (order.customer_id !== user.id) {
+      return res.status(403).json({
+        success: false,
+        message: "You cannot trigger a notification for this order.",
+      });
+    }
+
+    // 🟢 5. Find the restaurant and its owner
+const { data: restaurant, error: restaurantError } = await supabaseAdmin
+.from("restaurants")
+.select("id, name, owner_id")
+.eq("id", order.restaurant_id)
+.maybeSingle();
+
+if (restaurantError) {
+  console.error("❌ Restaurant lookup error:", restaurantError);
+  return res.status(500).json({
+    success: false,
+    message: "Could not find the restaurant."
+  });
+}
+if (!restaurant) {
+  return res.status(404).json({
+    success: false,
+    message: "Restaurant not found."
+  });
+}
+// 🟢 6. Look up the restaurant owner using restaurant_owners first
+const { data: ownerLink, error: ownerLinkError } = await supabaseAdmin
+  .from("restaurant_owners")
+  .select("id, user_id, restaurant_id, status")
+  .eq("restaurant_id", restaurant.id)
+  .maybeSingle();
+if (ownerLinkError) {
+  console.error("❌ Restaurant owner link lookup error:", ownerLinkError);
+}
+// 🟢 7. Use the linked owner first, then fall back to restaurants.owner_id
+const restaurantOwnerId =
+  ownerLink?.user_id || restaurant.owner_id;
+if (!restaurantOwnerId) {
+  console.error(
+    "❌ No owner found for restaurant:",
+    restaurant.id
+  );
+  return res.status(404).json({
+    success: false,
+    message: "Restaurant owner not found."
+  });
+}
+
+    // 🟢 8. Prepare the notification
+const title = "🍽️ New Restaurant Order";
+const body = `Order ${order.order_number || order.id} has been placed at ${restaurant.name || "your restaurant"}.`;
+
+// 🟢 9. Send the browser push notification
+let browserResult = null;
+try {
+  browserResult = await sendBrowserPushToUser(
+    restaurantOwnerId,
+    title,
+    body,
+    "/orders"
+  );
+} catch (browserError) {
+  console.error(
+    "Restaurant browser push failed:",
+    browserError.message
+  );
+}
+// 🟢 10. Retrieve the owner's Expo push token
+const { data: ownerProfile, error: profileError } =
+  await supabaseAdmin
+    .from("profiles")
+    .select("push_token")
+    .eq("id", restaurantOwnerId)
+    .maybeSingle();
+if (profileError) {
+  console.error(
+    "Restaurant owner push-token lookup failed:",
+    profileError
+  );
+}
+// 🟢 11. Send a mobile push notification when a token exists
+let mobileSent = false;
+if (ownerProfile?.push_token) {
+  try {
+    await sendPush(
+      [ownerProfile.push_token],
+      title,
+      body,
+      {
+        type: "restaurant_order",
+        order_id: order.id,
+        restaurant_id: restaurant.id,
+      }
+    );
+    mobileSent = true;
+  } catch (mobileError) {
+    console.error(
+      "Restaurant mobile push failed:",
+      mobileError.message
+    );
+  }
+}
+// 🟢 12. Return the result
+return res.json({
+  success: true,
+  message: "Restaurant order notification processed.",
+  browser: browserResult,
+  mobileSent,
+});
+
+} catch (error) {
+console.error(
+"Restaurant new-order notification error:",
+error
+);
+
+return res.status(500).json({
+  success: false,
+  message: "Restaurant notification failed.",
+});
+
+}
+});
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
