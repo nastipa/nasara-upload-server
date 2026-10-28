@@ -3419,7 +3419,9 @@ const {
   error: messageError,
 } = await supabaseAdmin
   .from("messages")
-  .select("id, sender_id, room_id, text")
+  .select(
+    "id, sender_id, room_id, text, image_url, audio_url, file_url, file_name"
+  )
   .eq("id", message_id)
   .maybeSingle();
 if (messageError) {
@@ -3504,14 +3506,20 @@ console.log("🟢 CHAT ROOM PARTICIPANTS VERIFIED:", {
   senderId,
   recipientId: recipient_id,
 });
-/* 🟢 5. PREPARE THE BROWSER NOTIFICATION */
+// 🟢 5. PREPARE THE BROWSER NOTIFICATION
 const notificationTitle = "💬 New Chat Message";
-/* 🟢 PREPARE THE NOTIFICATION MESSAGE */
 
+// 🟢 Choose notification text based on message type
 const notificationBody =
   typeof message.text === "string" && message.text.trim()
     ? message.text.trim().slice(0, 160)
-    : "You have received a new message on Nasara.";
+    : message.image_url
+    ? "🖼️ You received a photo on Nasara."
+    : message.audio_url
+    ? "🎤 You received a voice note on Nasara."
+    : message.file_url
+    ? `📎 You received a file${message.file_name ? `: ${message.file_name}` : ""}`
+    : "📩 You received a new message on Nasara.";
 /* 🔵 6. SEND ONLY TO THE RECIPIENT'S WEBSITE BROWSERS */
 const browserResult = await sendBrowserPushToUser(
   recipient_id,
