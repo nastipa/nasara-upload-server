@@ -4058,6 +4058,190 @@ return res.status(500).json({
 
 }
 });
+
+// ============================================================
+// 🌾 FARM STOCK BROWSER PUSH NOTIFICATION
+// ============================================================
+
+app.post(
+  "/farm-stock-browser-push",
+  async (req, res) => {
+    try {
+      // ==========================================
+      // 🔐 VERIFY AUTHENTICATED USER
+      // ==========================================
+
+      const authorization =
+        req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const accessToken = authorization
+        .slice(7)
+        .trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(
+        accessToken
+      );
+
+      if (authError || !userData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const user = userData.user;
+
+      // ==========================================
+      // 📝 VALIDATE STOCK ID
+      // ==========================================
+
+      const stockId = Number(req.body?.stock_id);
+
+      if (
+        !Number.isSafeInteger(stockId) ||
+        stockId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "A valid stock_id is required.",
+        });
+      }
+
+      // ==========================================
+      // 🔎 VERIFY STOCK OWNERSHIP
+      // ==========================================
+
+      const {
+        data: stock,
+        error: stockError,
+      } = await supabaseAdmin
+        .from("farm_stocks")
+        .select(
+          "id, farm_id, user_id, product_name, quantity, unit, created_at"
+        )
+        .eq("id", stockId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (stockError) {
+        console.error(
+          "Farm stock lookup failed:",
+          stockError.message
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify farm stock.",
+        });
+      }
+
+      if (!stock) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Stock not found or you are not authorized to notify users about it.",
+        });
+      }
+
+      // ==========================================
+      // ⏱️ ONLY NOTIFY ABOUT RECENTLY CREATED STOCK
+      // ==========================================
+
+      const createdAt = new Date(
+        stock.created_at
+      ).getTime();
+
+      const age = Date.now() - createdAt;
+
+      if (
+        !Number.isFinite(createdAt) ||
+        age < -60000 ||
+        age > 5 * 60 * 1000
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Notifications can only be requested for recently created stock.",
+        });
+      }
+
+      // ==========================================
+      // 🌾 BUILD NOTIFICATION
+      // ==========================================
+
+      const productName =
+        stock.product_name || "Farm Produce";
+
+      const quantity = Number(stock.quantity);
+
+      const quantityText =
+        Number.isFinite(quantity) &&
+        stock.unit
+          ? ` Available quantity: ${quantity} ${stock.unit}.`
+          : "";
+
+      const title =
+        `🌾 New ${productName} Stock on Nasara!`;
+
+      const body =
+        `New ${productName} stock has been added to Nasara.${quantityText}`;
+
+      const url = stock.farm_id
+        ? `/farm/${stock.farm_id}`
+        : "/";
+
+      // ==========================================
+      // 🔔 BROADCAST TO BROWSER SUBSCRIBERS
+      // ==========================================
+
+      const result = await broadcastBrowserPush(
+        title,
+        body,
+        url,
+        user.id
+      );
+
+      console.log(
+        "🌾 FARM STOCK BROWSER NOTIFICATION:",
+        JSON.stringify({
+          stockId: stock.id,
+          productName,
+          sent: result.sent,
+          failed: result.failed,
+        })
+      );
+
+      return res.json({
+        success: true,
+        message:
+          "Farm stock browser notification processed.",
+        sent: result.sent,
+        failed: result.failed,
+      });
+    } catch (error) {
+      console.error(
+        "Farm stock browser notification error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Could not send farm stock notification.",
+      });
+    }
+  }
+);
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
