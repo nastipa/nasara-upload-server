@@ -5000,9 +5000,85 @@ app.get("/", (req, res) => {
   res.send("Nasara upload server running 🚀");
 });
 
-/* ================= START SERVER ================= */
+// ============================================================
+// 🛍️ NASARA FRIDAY MARKET AUTOMATIC REMINDER
+// ============================================================
+
+const cron = require("node-cron");
+
+// Ghana uses Africa/Accra time.
+const FRIDAY_MARKET_CRON = "0 6 * * 5";
+
+let fridayMarketReminderRunning = false;
+
+cron.schedule(
+  FRIDAY_MARKET_CRON,
+  async () => {
+    if (fridayMarketReminderRunning) {
+      console.log(
+        "🟡 Friday Market reminder is already running. Skipping."
+      );
+      return;
+    }
+
+    fridayMarketReminderRunning = true;
+
+    try {
+      console.log(
+        "================================================"
+      );
+
+      console.log(
+        "🛍️ FRIDAY MARKET REMINDER STARTED"
+      );
+
+      console.log(
+        "Time:",
+        new Date().toISOString()
+      );
+
+      // Change this URL if your actual Friday Market
+      // screen uses a different route.
+      const notificationUrl = "/";
+
+      const result = await broadcastBrowserPush(
+        "🛍️ Nasara Friday Market Is Open!",
+        "It's Friday! Visit Nasara to discover products, connect with sellers, and explore Friday Market deals.",
+        notificationUrl
+      );
+
+      console.log(
+        "🛍️ FRIDAY MARKET REMINDER RESULT:",
+        JSON.stringify(result)
+      );
+
+      console.log(
+        "================================================"
+      );
+    } catch (error) {
+      console.error(
+        "🔴 FRIDAY MARKET REMINDER ERROR:",
+        error
+      );
+    } finally {
+      fridayMarketReminderRunning = false;
+    }
+  },
+  {
+    timezone: "Africa/Accra",
+  }
+);
+
+// ============================================================
+// 🟢 START SERVER
+// ============================================================
+
 const PORT = process.env.PORT || 3000;
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port " + PORT);
+
+  console.log(
+    "🛍️ Friday Market reminder scheduled for Fridays at 6:00 AM Ghana time."
+  );
 });
