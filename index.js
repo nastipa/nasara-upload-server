@@ -3614,20 +3614,46 @@ console.log("🟢 CHAT ROOM PARTICIPANTS VERIFIED:", {
   senderId,
   recipientId: recipient_id,
 });
-// 🟢 5. PREPARE THE BROWSER NOTIFICATION
-const notificationTitle = "💬 New Chat Message";
+/* 🟡 =====================================================
+💬 5. PREPARE THE BROWSER NOTIFICATION WITH SENDER NAME
+===================================================== */
 
-// 🟢 Choose notification text based on message type
+// 👤 GET THE SENDER’S NAME FROM THE PROFILES TABLE
+const {
+data: chatSender,
+error: chatSenderError,
+} = await supabaseAdmin
+.from("profiles")
+.select("full_name")
+.eq("id", message.sender_id)
+.maybeSingle();
+
+// 🔴 LOG PROFILE LOOKUP ERRORS WITHOUT STOPPING THE MESSAGE
+if (chatSenderError) {
+console.error(
+"🔴 CHAT SENDER PROFILE LOOKUP ERROR:",
+chatSenderError.message
+);
+}
+
+// 🟢 USE THE SENDER’S NAME, WITH A FALLBACK
+const senderName =
+chatSender?.full_name?.trim() || "A Nasara User";
+
+// 🔔 SHOW THE ACTUAL SENDER’S NAME AS THE NOTIFICATION TITLE
+const notificationTitle = `💬 ${senderName}`;
+
+// 💬 CHOOSE THE NOTIFICATION BODY BASED ON MESSAGE TYPE
 const notificationBody =
-  typeof message.text === "string" && message.text.trim()
-    ? message.text.trim().slice(0, 160)
-    : message.image_url
-    ? "🖼️ You received a photo on Nasara."
-    : message.audio_url
-    ? "🎤 You received a voice note on Nasara."
-    : message.file_url
-    ? `📎 You received a file${message.file_name ? `: ${message.file_name}` : ""}`
-    : "📩 You received a new message on Nasara.";
+typeof message.text === "string" && message.text.trim()
+? message.text.trim().slice(0, 160)
+: message.image_url
+? "🖼️ Sent you a photo"
+: message.audio_url
+? "🎤 Sent you a voice note"
+: message.file_url
+? `📎 Sent you a file${message.file_name ?` : ${message.file_name}` : ""}`
+: "📩 Sent you a new message";
 /* 🔵 6. SEND ONLY TO THE RECIPIENT'S WEBSITE BROWSERS */
 const browserResult = await sendBrowserPushToUser(
   recipient_id,
