@@ -4176,30 +4176,56 @@ app.post(
       }
 
       // ==========================================
-      // 🌾 BUILD NOTIFICATION
+      // 🌾 BUILD NOTIFICATION WITH FARM NAME
       // ==========================================
 
+      // 🏡 GET THE FARM NAME
+      const {
+        data: farm,
+        error: farmError,
+      } = await supabaseAdmin
+        .from("farm_profiles")
+        .select("farm_name")
+        .eq("id", stock.farm_id)
+        .maybeSingle();
+
+      if (farmError) {
+        console.error(
+          "Could not retrieve farm name:",
+          farmError.message
+        );
+      }
+
+      const farmName =
+        farm?.farm_name || "A Nasara Farmer";
+
+      // 🥚 GET THE PRODUCT NAME
       const productName =
         stock.product_name || "Farm Produce";
 
+      // 📦 FORMAT THE AVAILABLE QUANTITY
       const quantity = Number(stock.quantity);
 
       const quantityText =
-        Number.isFinite(quantity) &&
-        stock.unit
+        stock.quantity !== null &&
+        stock.quantity !== undefined &&
+        stock.unit &&
+        Number.isFinite(quantity)
           ? ` Available quantity: ${quantity} ${stock.unit}.`
           : "";
 
+      // 🔔 CREATE THE NOTIFICATION
       const title =
-        `🌾 New ${productName} Stock on Nasara!`;
+        `🌾 New Stock from ${farmName}!`;
 
       const body =
-        `New ${productName} stock has been added to Nasara.${quantityText}`;
+        `${productName} has been added by ${farmName} on Nasara. +
+        quantityText`;
 
+      // 🔗 FARM DESTINATION
       const url = stock.farm_id
         ? `/farm/${stock.farm_id}`
         : "/";
-
       // ==========================================
       // 🔔 BROADCAST TO BROWSER SUBSCRIBERS
       // ==========================================
