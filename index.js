@@ -3240,13 +3240,41 @@ app.post("/send-push", async (req, res) => {
       });
     }
 
-    // Use the verified item's actual title.
-    const notificationTitle = "🛒 New Item";
+    // =====================================================
+// 🟢 4B. GET SELLER NAME AND BUILD NOTIFICATION
+// =====================================================
 
-    const notificationBody =
-      typeof item.title === "string" && item.title.trim()
-        ? item.title.trim().slice(0, 1000)
-        : body.trim();
+// 👤 RETRIEVE SELLER PROFILE
+const {
+data: sellerProfile,
+error: sellerProfileError,
+} = await supabaseAdmin
+.from("profiles")
+.select("full_name")
+.eq("id", item.user_id)
+.maybeSingle();
+
+// 🔴 LOG PROFILE LOOKUP ERRORS
+if (sellerProfileError) {
+console.error(
+"SELLER PROFILE LOOKUP ERROR:",
+sellerProfileError.message
+);
+}
+
+// 🟢 USE THE SELLER’S ACTUAL NAME
+const sellerName =
+sellerProfile?.full_name?.trim() || "A Nasara User";
+
+// 🛒 BUILD NOTIFICATION TITLE
+const notificationTitle =
+`🛒 New Item from ${sellerName}`;
+
+// 📦 USE THE VERIFIED ITEM TITLE AS THE MESSAGE
+const notificationBody =
+typeof item.title === "string" && item.title.trim()
+? item.title.trim().slice(0, 1000)
+: body.trim();
 
     // =====================================================
     // 5. SEND EXISTING EXPO / NATIVE PUSH NOTIFICATIONS
