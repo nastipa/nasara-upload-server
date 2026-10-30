@@ -5271,7 +5271,7 @@ app.get("/", (req, res) => {
 const cron = require("node-cron");
 
 // Ghana uses Africa/Accra time.
-const FRIDAY_MARKET_CRON = "0 6 * * 5";
+const FRIDAY_MARKET_CRON = "25 7 * * 5";
 
 let fridayMarketReminderRunning = false;
 
