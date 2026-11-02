@@ -201,6 +201,212 @@ app.post(
 
   }
 );
+
+// ============================================================
+// 🎵 NASARA REELS — ADMIN MUSIC UPLOAD
+// POST /upload-reel-music
+// ============================================================
+
+app.post(
+  "/upload-reel-music",
+  upload.single("file"),
+  async (req, res) => {
+    try {
+      // ==========================================
+      // 🔐 1. VERIFY ADMIN AUTHENTICATION
+      // ==========================================
+
+      const authorization = req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const token = authorization.slice(7).trim();
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const userId = authData.user.id;
+
+      // ==========================================
+      // 🛡️ 2. VERIFY NASARA ADMIN
+      // ==========================================
+
+      const {
+        data: admin,
+        error: adminError,
+      } = await supabaseAdmin
+        .from("admins")
+        .select("user_id")
+        .eq("user_id", userId)
+        .maybeSingle();
+
+      if (adminError) {
+        console.error("MUSIC ADMIN CHECK ERROR:", adminError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify administrator permissions.",
+        });
+      }
+
+      if (!admin) {
+        return res.status(403).json({
+          success: false,
+          error: "Only Nasara administrators can upload music.",
+        });
+      }
+
+      // ==========================================
+      // 📦 3. VALIDATE MUSIC FILE
+      // ==========================================
+
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({
+          success: false,
+          error: "Please select an audio file.",
+        });
+      }
+
+      const allowedAudioTypes = {
+        "audio/mpeg": ".mp3",
+        "audio/mp3": ".mp3",
+        "audio/mp4": ".m4a",
+        "audio/x-m4a": ".m4a",
+        "audio/aac": ".aac",
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/ogg": ".ogg",
+      };
+
+      const extension = allowedAudioTypes[file.mimetype];
+
+      if (!extension) {
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported audio format. Use MP3, M4A, AAC, WAV or OGG.",
+        });
+      }
+
+      // ==========================================
+      // 📝 4. VALIDATE MUSIC DETAILS
+      // ==========================================
+
+      const title = String(req.body?.title || "").trim();
+      const artist = String(req.body?.artist || "").trim();
+      const category = String(req.body?.category || "").trim();
+
+      if (!title || title.length > 150) {
+        return res.status(400).json({
+          success: false,
+          error: "A music title is required (maximum 150 characters).",
+        });
+      }
+
+      if (artist.length > 150 || category.length > 80) {
+        return res.status(400).json({
+          success: false,
+          error: "Artist or category information is too long.",
+        });
+      }
+
+      // ==========================================
+      // ☁️ 5. UPLOAD AUDIO TO CLOUDFLARE R2
+      // ==========================================
+
+      const crypto = require("crypto");
+
+      const fileName =
+        `reel-music/${crypto.randomBytes(16).toString("hex")}${extension}`;
+
+      await s3.upload({
+        Bucket: process.env.R2_BUCKET,
+        Key: fileName,
+        Body: file.buffer,
+        ContentType: file.mimetype,
+      }).promise();
+
+      const audioUrl =
+        `https://${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+
+      // ==========================================
+      // 💾 6. SAVE MUSIC DETAILS IN SUPABASE
+      // ==========================================
+
+      const {
+        data: music,
+        error: musicError,
+      } = await supabaseAdmin
+        .from("reel_music")
+        .insert({
+          title,
+          artist: artist || null,
+          category: category || null,
+          audio_url: audioUrl,
+          is_active: true,
+        })
+        .select("*")
+        .single();
+
+      if (musicError) {
+        console.error("MUSIC DATABASE ERROR:", musicError);
+
+        // Remove uploaded audio if database insertion fails.
+        try {
+          await s3.deleteObject({
+            Bucket: process.env.R2_BUCKET,
+            Key: fileName,
+          }).promise();
+        } catch (deleteError) {
+          console.error("R2 CLEANUP ERROR:", deleteError);
+        }
+
+        return res.status(500).json({
+          success: false,
+          error: "Audio uploaded, but music details could not be saved.",
+        });
+      }
+
+      // ==========================================
+      // ✅ 7. RETURN SUCCESS
+      // ==========================================
+
+      console.log("🎵 REEL MUSIC UPLOADED:", {
+        musicId: music.id,
+        title: music.title,
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: "Music uploaded successfully.",
+        music,
+      });
+
+    } catch (error) {
+      console.error("🎵 REEL MUSIC UPLOAD ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not upload Reel music.",
+      });
+    }
+  }
+);
 /* ================= CREATE ADMIN ================= */
 app.post("/create-admin", async (req, res) => {
   try {
