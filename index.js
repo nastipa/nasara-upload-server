@@ -414,6 +414,7 @@ app.post(
   }
 );
 
+
 // ======================================================
 // 🎬 NASARA REEL VIDEO + MUSIC PROCESSING
 // ======================================================
@@ -520,7 +521,31 @@ function reelNumber(value, fallback, minimum, maximum) {
 
   return Math.min(maximum, Math.max(minimum, number));
 }
+// ======================================================
+// 🔍 DETECT WHETHER A VIDEO HAS AN AUDIO STREAM
+// ======================================================
 
+function reelVideoHasAudio(videoPath) {
+  return new Promise((resolve, reject) => {
+    const process = spawn(ffmpegPath, [
+      "-hide_banner",
+      "-i",
+      videoPath,
+    ]);
+
+    let output = "";
+
+    process.stderr.on("data", (data) => {
+      output += data.toString();
+    });
+
+    process.on("error", reject);
+
+    process.on("close", () => {
+      resolve(/Stream #\d+:\d+.*Audio:/i.test(output));
+    });
+  });
+}
 // 🟦 PROCESS REEL ENDPOINT
 
 app.post(
@@ -697,59 +722,81 @@ app.post(
         );
       }
 
-      // ==============================================
-      // 🎚️ AUDIO MIXING
-      // ==============================================
+     // ==============================================
+// 🎚️ AUDIO MIXING — SUPPORTS SILENT VIDEOS
+// ==============================================
 
-      if (musicFile) {
-        const musicTrim = musicDuration > 0
-          ? `atrim=duration=${musicDuration},`
-          : "";
+const hasOriginalAudio =
+  await reelVideoHasAudio(inputVideoPath);
 
-        const videoDurationFilter = videoDuration > 0
-          ? `atrim=duration=${videoDuration},`
-          : "";
+if (musicFile) {
+  const filters = [];
 
-        ffmpegArgs.push(
-          "-filter_complex",
+  // 🎥 Keep the video stream
+  filters.push("[0:v]null[vout]");
 
-          [
-            `[0:v]null[vout]`,
+  // 🔊 Original video audio, when available
+  if (hasOriginalAudio) {
+    filters.push(
+      `[0:a]volume=${originalVolume},apad[a0]`
+    );
+  }
 
-            `[0:a]volume=${originalVolume},${videoDurationFilter}asetpts=PTS-STARTPTS[a0]`,
+  // 🎵 Added music
+  const musicTrim =
+    musicDuration > 0
+      ? `atrim=duration=${musicDuration},`
+      : "";
 
-            `[1:a]${musicTrim}volume=${musicVolume},asetpts=PTS-STARTPTS[a1]`,
+  filters.push(
+    `[1:a]${musicTrim}asetpts=PTS-STARTPTS,volume=${musicVolume},apad[a1]`
+  );
 
-            `[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
-          ].join(";"),
+  // 🎧 Mix both audio sources or use music alone
+  if (hasOriginalAudio) {
+    filters.push(
+      "[a0][a1]amix=inputs=2:duration=longest:dropout_transition=2[aout]"
+    );
+  } else {
+    filters.push("[a1]anull[aout]");
+  }
 
-          "-map",
-          "[vout]",
+  ffmpegArgs.push(
+    "-filter_complex",
+    filters.join(";"),
 
-          "-map",
-          "[aout]"
-        );
-      } else {
-        // ==========================================
-        // 🔊 VIDEO WITHOUT ADDED MUSIC
-        // ==========================================
+    "-map",
+    "[vout]",
 
-        ffmpegArgs.push(
-          "-map",
-          "0:v:0"
-        );
+    "-map",
+    "[aout]",
 
-        ffmpegArgs.push(
-          "-map",
-          "0:a?"
-        );
+    "-shortest"
+  );
 
-        ffmpegArgs.push(
-          "-af",
-          `volume=${originalVolume}`
-        );
-      }
+} else {
+  // ==========================================
+  // 🔊 NO ADDED MUSIC
+  // ==========================================
 
+  ffmpegArgs.push(
+    "-map",
+    "0:v:0"
+  );
+
+  if (hasOriginalAudio) {
+    ffmpegArgs.push(
+      "-map",
+      "0:a:0",
+      "-af",
+      `volume=${originalVolume}`
+    );
+  } else {
+    ffmpegArgs.push(
+      "-an"
+    );
+  }
+}
       // ==============================================
       // ⏱️ FINAL VIDEO DURATION
       // ==============================================
