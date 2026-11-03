@@ -12,6 +12,12 @@ const restaurantRoutes = require("./routes/restaurant");
 const { createClient } = require("@supabase/supabase-js");
 const fetch = require("node-fetch");
 const AdmZip = require("adm-zip");
+// 🟦 REEL VIDEO PROCESSING IMPORTS
+
+const os = require("os");
+const crypto = require("crypto");
+const { spawn } = require("child_process");
+const ffmpegPath = require("ffmpeg-static");
 const notifyUser = require("./services/notifyUser");
 const {
 sendBrowserPushToUser,
@@ -404,6 +410,482 @@ app.post(
         success: false,
         error: "Could not upload Reel music.",
       });
+    }
+  }
+);
+
+// ======================================================
+// 🎬 NASARA REEL VIDEO + MUSIC PROCESSING
+// ======================================================
+
+// 🟦 MULTER CONFIGURATION
+
+const reelProcessingUpload = multer({
+  storage: multer.memoryStorage(),
+
+  limits: {
+    fileSize: 150 * 1024 * 1024,
+    files: 2,
+  },
+
+  fileFilter: (req, file, cb) => {
+    if (file.fieldname === "video") {
+      if (file.mimetype.startsWith("video/")) {
+        return cb(null, true);
+      }
+
+      return cb(new Error("Please upload a valid video file."));
+    }
+
+    if (file.fieldname === "music") {
+      const allowedMusicTypes = [
+        "audio/mpeg",
+        "audio/mp3",
+        "audio/mp4",
+        "audio/aac",
+        "audio/wav",
+        "audio/x-wav",
+        "audio/ogg",
+        "audio/webm",
+        "audio/x-m4a",
+      ];
+
+      if (
+        allowedMusicTypes.includes(file.mimetype) ||
+        file.mimetype.startsWith("audio/")
+      ) {
+        return cb(null, true);
+      }
+
+      return cb(new Error("Please upload a valid music file."));
+    }
+
+    return cb(new Error("Unexpected upload field."));
+  },
+});
+
+// 🟦 FFmpeg EXECUTION HELPER
+
+function runReelFFmpeg(args) {
+  return new Promise((resolve, reject) => {
+    if (!ffmpegPath) {
+      return reject(
+        new Error("FFmpeg executable is not available.")
+      );
+    }
+
+    const process = spawn(ffmpegPath, args);
+
+    let errorOutput = "";
+
+    process.stderr.on("data", (data) => {
+      errorOutput += data.toString();
+
+      // Prevent excessive memory usage from FFmpeg logs.
+      if (errorOutput.length > 100000) {
+        errorOutput = errorOutput.slice(-100000);
+      }
+    });
+
+    process.on("error", (error) => {
+      reject(error);
+    });
+
+    process.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(
+          new Error(
+            `FFmpeg failed with code ${code}: ${errorOutput.slice(-5000)}`
+          )
+        );
+      }
+    });
+  });
+}
+
+// 🟦 VALIDATE NUMERIC SETTINGS
+
+function reelNumber(value, fallback, minimum, maximum) {
+  if (value === undefined || value === null || value === "") {
+    return fallback;
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    throw new Error("Invalid Reel processing setting.");
+  }
+
+  return Math.min(maximum, Math.max(minimum, number));
+}
+
+// 🟦 PROCESS REEL ENDPOINT
+
+app.post(
+  "/process-reel",
+
+  reelProcessingUpload.fields([
+    {
+      name: "video",
+      maxCount: 1,
+    },
+    {
+      name: "music",
+      maxCount: 1,
+    },
+  ]),
+
+  async (req, res) => {
+    let temporaryDirectory;
+
+    try {
+      // ==============================================
+      // 🔐 AUTHENTICATION
+      // ==============================================
+
+      const authorization =
+        req.headers.authorization || "";
+
+      const token = authorization.startsWith("Bearer ")
+        ? authorization.slice(7)
+        : null;
+
+      if (!token) {
+        return res.status(401).json({
+          error: "Authentication required.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          error: "Invalid or expired session.",
+        });
+      }
+
+      // ==============================================
+      // 📁 GET UPLOADED FILES
+      // ==============================================
+
+      const videoFile =
+        req.files?.video?.[0];
+
+      const musicFile =
+        req.files?.music?.[0];
+
+      if (!videoFile) {
+        return res.status(400).json({
+          error: "A video file is required.",
+        });
+      }
+
+      if (!videoFile.mimetype.startsWith("video/")) {
+        return res.status(400).json({
+          error: "Invalid video file.",
+        });
+      }
+
+      // ==============================================
+      // 🎚️ READ TRIMMING AND VOLUME SETTINGS
+      // ==============================================
+
+      const videoStart = reelNumber(
+        req.body.video_start,
+        0,
+        0,
+        3600
+      );
+
+      const videoDuration = reelNumber(
+        req.body.video_duration,
+        0,
+        0,
+        600
+      );
+
+      const musicStart = reelNumber(
+        req.body.music_start,
+        0,
+        0,
+        3600
+      );
+
+      const musicDuration = reelNumber(
+        req.body.music_duration,
+        0,
+        0,
+        600
+      );
+
+      const originalVolume = reelNumber(
+        req.body.original_volume,
+        1,
+        0,
+        2
+      );
+
+      const musicVolume = reelNumber(
+        req.body.music_volume,
+        0.7,
+        0,
+        2
+      );
+
+      // ==============================================
+      // 📂 CREATE TEMPORARY WORKING DIRECTORY
+      // ==============================================
+
+      temporaryDirectory = await fs.promises.mkdtemp(
+        path.join(os.tmpdir(), "nasara-reel-")
+      );
+
+      const inputVideoPath = path.join(
+        temporaryDirectory,
+        "input-video"
+      );
+
+      const inputMusicPath = path.join(
+        temporaryDirectory,
+        "input-music"
+      );
+
+      const outputVideoPath = path.join(
+        temporaryDirectory,
+        "processed-reel.mp4"
+      );
+
+      await fs.promises.writeFile(
+        inputVideoPath,
+        videoFile.buffer
+      );
+
+      if (musicFile) {
+        await fs.promises.writeFile(
+          inputMusicPath,
+          musicFile.buffer
+        );
+      }
+
+      // ==============================================
+      // 🎬 BUILD FFMPEG COMMAND
+      // ==============================================
+
+      const ffmpegArgs = [
+        "-y",
+
+        // 🎥 VIDEO INPUT AND TRIMMING
+        "-ss",
+        String(videoStart),
+
+        "-i",
+        inputVideoPath,
+      ];
+
+      if (musicFile) {
+        // 🎵 MUSIC INPUT AND TRIMMING
+        ffmpegArgs.push(
+          "-ss",
+          String(musicStart),
+          "-i",
+          inputMusicPath
+        );
+      }
+
+      // ==============================================
+      // 🎚️ AUDIO MIXING
+      // ==============================================
+
+      if (musicFile) {
+        const musicTrim = musicDuration > 0
+          ? `atrim=duration=${musicDuration},`
+          : "";
+
+        const videoDurationFilter = videoDuration > 0
+          ? `atrim=duration=${videoDuration},`
+          : "";
+
+        ffmpegArgs.push(
+          "-filter_complex",
+
+          [
+            `[0:v]null[vout]`,
+
+            `[0:a]volume=${originalVolume},${videoDurationFilter}asetpts=PTS-STARTPTS[a0]`,
+
+            `[1:a]${musicTrim}volume=${musicVolume},asetpts=PTS-STARTPTS[a1]`,
+
+            `[a0][a1]amix=inputs=2:duration=first:dropout_transition=2[aout]`,
+          ].join(";"),
+
+          "-map",
+          "[vout]",
+
+          "-map",
+          "[aout]"
+        );
+      } else {
+        // ==========================================
+        // 🔊 VIDEO WITHOUT ADDED MUSIC
+        // ==========================================
+
+        ffmpegArgs.push(
+          "-map",
+          "0:v:0"
+        );
+
+        ffmpegArgs.push(
+          "-map",
+          "0:a?"
+        );
+
+        ffmpegArgs.push(
+          "-af",
+          `volume=${originalVolume}`
+        );
+      }
+
+      // ==============================================
+      // ⏱️ FINAL VIDEO DURATION
+      // ==============================================
+
+      if (videoDuration > 0) {
+        ffmpegArgs.push(
+          "-t",
+          String(videoDuration)
+        );
+      }
+
+      // ==============================================
+      // 🎞️ VIDEO ENCODING
+      // ==============================================
+
+      ffmpegArgs.push(
+        "-c:v",
+        "libx264",
+
+        "-preset",
+        "veryfast",
+
+        "-crf",
+        "23",
+
+        "-pix_fmt",
+        "yuv420p",
+
+        "-c:a",
+        "aac",
+
+        "-b:a",
+        "192k",
+
+        "-ar",
+        "44100",
+
+        "-movflags",
+        "+faststart",
+
+        outputVideoPath
+      );
+
+      // ==============================================
+      // ⚙️ PROCESS VIDEO
+      // ==============================================
+
+      console.log(
+        "🎬 Starting Nasara Reel processing:",
+        authData.user.id
+      );
+
+      await runReelFFmpeg(ffmpegArgs);
+
+      // ==============================================
+      // 🔍 CHECK OUTPUT
+      // ==============================================
+
+      const outputStats = await fs.promises.stat(
+        outputVideoPath
+      );
+
+      if (!outputStats.size) {
+        throw new Error(
+          "FFmpeg produced an empty video."
+        );
+      }
+
+      // ==============================================
+      // ☁️ UPLOAD FINAL VIDEO TO CLOUDFLARE R2
+      // ==============================================
+
+      const fileName =
+        `reels/${authData.user.id}/${Date.now()}-${crypto.randomBytes(6).toString("hex")}.mp4`;
+
+      const params = {
+        Bucket: process.env.R2_BUCKET,
+        Key: fileName,
+        Body: fs.createReadStream(outputVideoPath),
+        ContentType: "video/mp4",
+      };
+
+      await s3.upload(params).promise();
+
+      const publicUrl =
+        `https://${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+
+      // ==============================================
+      // ✅ SUCCESS RESPONSE
+      // ==============================================
+
+      console.log(
+        "✅ Nasara Reel processing completed:",
+        fileName
+      );
+
+      return res.status(200).json({
+        success: true,
+        url: publicUrl,
+        duration: videoDuration || null,
+        message: "Reel processed successfully.",
+      });
+
+    } catch (error) {
+      console.error(
+        "❌ Reel processing error:",
+        error
+      );
+
+      return res.status(500).json({
+        error:
+          error.message ||
+          "Could not process Reel.",
+      });
+
+    } finally {
+      // ==============================================
+      // 🧹 CLEAN TEMPORARY FILES
+      // ==============================================
+
+      if (temporaryDirectory) {
+        try {
+          await fs.promises.rm(
+            temporaryDirectory,
+            {
+              recursive: true,
+              force: true,
+            }
+          );
+        } catch (cleanupError) {
+          console.error(
+            "Temporary Reel cleanup error:",
+            cleanupError
+          );
+        }
+      }
     }
   }
 );
