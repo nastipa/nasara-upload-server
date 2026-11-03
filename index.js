@@ -881,9 +881,20 @@ if (musicFile) {
 
       await s3.upload(params).promise();
 
-      const publicUrl =
-        `https://${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
+      // ==============================================
+// 🌐 BUILD CORRECT CLOUDFLARE R2 PUBLIC URL
+// ==============================================
 
+const publicDomain =
+  process.env.R2_PUBLIC_DOMAIN
+    .trim()
+    .replace(/^https?:\/\//i, "")
+    .replace(/\/+$/, "");
+
+const publicUrl =
+  `https://${publicDomain}/${fileName}`;
+
+console.log("🎬 Final Reel URL:", publicUrl);
       // ==============================================
       // ✅ SUCCESS RESPONSE
       // ==============================================
