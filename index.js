@@ -5648,33 +5648,34 @@ app.post(
         });
       });
 
-      // ==========================================
-      // ☁️ UPLOAD COMBINED VIDEO TO CLOUDFLARE R2
-      // ==========================================
+     // ==========================================
+// ☁️ UPLOAD COMBINED VIDEO TO CLOUDFLARE R2
+// ==========================================
 
-      const fileName = `combined-videos/${Date.now()}-${crypto.randomBytes(5).toString("hex")}.mp4`;
+const fileName = `combined-videos/${Date.now()}-${crypto.randomBytes(5).toString("hex")}.mp4`;
 
-      const publicUrl = `${process.env.R2_PUBLIC_URL}/${fileName}`;
+await s3
+  .upload({
+    Bucket: process.env.R2_BUCKET,
+    Key: fileName,
+    Body: fs.readFileSync(outputPath),
+    ContentType: "video/mp4",
+  })
+  .promise();
 
-      await s3
-        .putObject({
-          Bucket: process.env.R2_BUCKET,
-          Key: fileName,
-          Body: fs.readFileSync(outputPath),
-          ContentType: "video/mp4",
-        })
-        .promise();
+const publicUrl =
+  `https://${process.env.R2_PUBLIC_DOMAIN}/${fileName}`;
 
-      // ==========================================
-      // ✅ RETURN FINAL VIDEO URL
-      // ==========================================
+// ==========================================
+// ✅ RETURN FINAL VIDEO URL
+// ==========================================
 
-      res.json({
-        success: true,
-        message: "Videos combined successfully.",
-        url: publicUrl,
-        key: fileName,
-      });
+res.json({
+  success: true,
+  message: "Videos combined successfully.",
+  url: publicUrl,
+  key: fileName,
+});
     } catch (error) {
       console.error("Video combination error:", error);
 
