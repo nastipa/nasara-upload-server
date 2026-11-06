@@ -5535,6 +5535,173 @@ console.log(
     }
   }
 );
+
+// ==========================================
+// 🎬 COMBINE TWO VIDEOS AND UPLOAD TO R2
+// ==========================================
+
+app.post(
+  "/combine-videos",
+  upload.array("videos", 2),
+  async (req, res) => {
+    const tempDir = path.join(
+      os.tmpdir(),
+      `nasara-combine-${crypto.randomBytes(8).toString("hex")}`
+    );
+
+    try {
+      // ==========================================
+      // 📁 VALIDATE SELECTED VIDEOS
+      // ==========================================
+
+      const files = req.files;
+
+      if (!files || files.length !== 2) {
+        return res.status(400).json({
+          success: false,
+          message: "Please upload exactly two videos.",
+        });
+      }
+
+      for (const file of files) {
+        if (!file.mimetype.startsWith("video/")) {
+          return res.status(400).json({
+            success: false,
+            message: "Both uploaded files must be videos.",
+          });
+        }
+      }
+
+      // ==========================================
+      // 📂 CREATE TEMPORARY DIRECTORY
+      // ==========================================
+
+      fs.mkdirSync(tempDir, { recursive: true });
+
+      const firstPath = path.join(tempDir, "first.mp4");
+      const secondPath = path.join(tempDir, "second.mp4");
+      const outputPath = path.join(tempDir, "combined.mp4");
+      const listPath = path.join(tempDir, "videos.txt");
+
+      fs.writeFileSync(firstPath, files[0].buffer);
+      fs.writeFileSync(secondPath, files[1].buffer);
+
+      // ==========================================
+      // 📝 CREATE FFmpeg CONCATENATION LIST
+      // ==========================================
+
+      const escapePath = (filePath) =>
+        filePath.replace(/\\/g, "/").replace(/'/g, "'\\''");
+
+      fs.writeFileSync(
+        listPath,
+        `file '${escapePath(firstPath)}'\nfile '${escapePath(secondPath)}'\n`
+      );
+
+      // ==========================================
+      // 🎞️ COMBINE VIDEOS USING FFmpeg
+      // ==========================================
+
+      await new Promise((resolve, reject) => {
+        const ffmpeg = spawn(ffmpegPath, [
+          "-y",
+          "-f",
+          "concat",
+          "-safe",
+          "0",
+          "-i",
+          listPath,
+          "-c:v",
+          "libx264",
+          "-preset",
+          "veryfast",
+          "-crf",
+          "23",
+          "-c:a",
+          "aac",
+          "-b:a",
+          "128k",
+          "-movflags",
+          "+faststart",
+          outputPath,
+        ]);
+
+        let errorOutput = "";
+
+        ffmpeg.stderr.on("data", (data) => {
+          errorOutput += data.toString();
+        });
+
+        ffmpeg.on("error", reject);
+
+        ffmpeg.on("close", (code) => {
+          if (code === 0 && fs.existsSync(outputPath)) {
+            resolve();
+          } else {
+            reject(
+              new Error(
+                errorOutput.slice(-3000) ||
+                  `FFmpeg exited with code ${code}`
+              )
+            );
+          }
+        });
+      });
+
+      // ==========================================
+      // ☁️ UPLOAD COMBINED VIDEO TO CLOUDFLARE R2
+      // ==========================================
+
+      const fileName = `combined-videos/${Date.now()}-${crypto.randomBytes(5).toString("hex")}.mp4`;
+
+      const publicUrl = `${process.env.R2_PUBLIC_URL}/${fileName}`;
+
+      await s3
+        .putObject({
+          Bucket: process.env.R2_BUCKET,
+          Key: fileName,
+          Body: fs.readFileSync(outputPath),
+          ContentType: "video/mp4",
+        })
+        .promise();
+
+      // ==========================================
+      // ✅ RETURN FINAL VIDEO URL
+      // ==========================================
+
+      res.json({
+        success: true,
+        message: "Videos combined successfully.",
+        url: publicUrl,
+        key: fileName,
+      });
+    } catch (error) {
+      console.error("Video combination error:", error);
+
+      res.status(500).json({
+        success: false,
+        message: "Failed to combine videos.",
+        error: error.message,
+      });
+    } finally {
+      // ==========================================
+      // 🧹 DELETE TEMPORARY FILES
+      // ==========================================
+
+      try {
+        fs.rmSync(tempDir, {
+          recursive: true,
+          force: true,
+        });
+      } catch (cleanupError) {
+        console.error(
+          "Temporary video cleanup error:",
+          cleanupError
+        );
+      }
+    }
+  }
+);
 /* ================= HEALTH CHECK (OPTIONAL BUT USEFUL) ================= */
 app.get("/", (req, res) => {
   res.send("Nasara upload server running 🚀");
