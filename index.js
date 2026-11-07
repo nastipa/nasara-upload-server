@@ -4598,6 +4598,195 @@ app.post(
     }
   }
 );
+
+// ============================================================
+// 🔴 LIVEKIT GO LIVE BROWSER PUSH NOTIFICATION
+// ============================================================
+
+app.post(
+  "/live-started-browser-push",
+  async (req, res) => {
+    try {
+      // ==========================================
+      // 🔐 VERIFY AUTHENTICATED USER
+      // ==========================================
+
+      const authorization =
+        req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const accessToken =
+        authorization.slice(7).trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(
+        accessToken
+      );
+
+      if (authError || !userData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const user = userData.user;
+
+      // ==========================================
+      // 📝 VALIDATE LIVE STREAM ID
+      // ==========================================
+
+      const streamId =
+        String(req.body?.stream_id || "").trim();
+
+      if (
+        !streamId ||
+        streamId.length > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "A valid stream_id is required.",
+        });
+      }
+
+      // ==========================================
+      // 🔎 VERIFY STREAM OWNERSHIP AND STATUS
+      // ==========================================
+
+      const {
+        data: stream,
+        error: streamError,
+      } = await supabaseAdmin
+        .from("live_streams")
+        .select(
+          "id, user_id, title, status, is_active"
+        )
+        .eq("id", streamId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (streamError) {
+        console.error(
+          "Live stream verification failed:",
+          streamError.message
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify live stream.",
+        });
+      }
+
+      if (!stream) {
+        return res.status(404).json({
+          success: false,
+          error:
+            "Live stream not found or you are not authorized.",
+        });
+      }
+
+      if (
+        stream.status !== "live" ||
+        stream.is_active !== true
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "This live stream is not active.",
+        });
+      }
+
+      // ==========================================
+      // 👤 GET BROADCASTER NAME
+      // ==========================================
+
+      const {
+        data: profile,
+        error: profileError,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (profileError) {
+        console.error(
+          "Live broadcaster profile lookup failed:",
+          profileError.message
+        );
+      }
+
+      const broadcasterName =
+        profile?.full_name || "A Nasara Creator";
+
+      // ==========================================
+      // 🔔 BUILD NOTIFICATION
+      // ==========================================
+
+      const title =
+        `🔴 ${broadcasterName} is Live on Nasara!`;
+
+      const body =
+        stream.title ||
+        `${broadcasterName} has started a live video. Join now!`;
+
+      // ==========================================
+      // 🔗 OPEN NASARA BROWSE
+      // ==========================================
+
+      const url = "/browse";
+
+      // ==========================================
+      // 📢 SEND TO BROWSER SUBSCRIBERS
+      // EXCLUDE THE BROADCASTER
+      // ==========================================
+
+      const result = await broadcastBrowserPush(
+        title,
+        body,
+        url,
+        user.id
+      );
+
+      console.log(
+        "🔴 LIVEKIT BROWSER NOTIFICATION:",
+        JSON.stringify({
+          streamId: stream.id,
+          broadcaster: broadcasterName,
+          sent: result.sent,
+          failed: result.failed,
+        })
+      );
+
+      return res.json({
+        success: true,
+        message:
+          "Live stream browser notification processed.",
+        sent: result.sent,
+        failed: result.failed,
+      });
+
+    } catch (error) {
+      console.error(
+        "LiveKit browser notification error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "Could not send live stream notification.",
+      });
+    }
+  }
+);
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
