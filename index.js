@@ -4787,6 +4787,230 @@ app.post(
     }
   }
 );
+
+// ============================================================
+// 🔴 LIVEKIT LIVE STARTED — WEB + EXPO APP NOTIFICATIONS
+// ============================================================
+
+app.post(
+  "/live-started-notification",
+  async (req, res) => {
+    try {
+      // ==========================================
+      // 🔐 VERIFY USER
+      // ==========================================
+
+      const authorization =
+        req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const accessToken = authorization
+        .slice(7)
+        .trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(
+        accessToken
+      );
+
+      if (authError || !userData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const user = userData.user;
+
+      // ==========================================
+      // 📝 VALIDATE STREAM ID
+      // ==========================================
+
+      const streamId = String(
+        req.body?.stream_id || ""
+      ).trim();
+
+      if (!streamId) {
+        return res.status(400).json({
+          success: false,
+          error: "stream_id is required.",
+        });
+      }
+
+      // ==========================================
+      // 🔎 VERIFY STREAM OWNERSHIP AND STATUS
+      // ==========================================
+
+      const {
+        data: stream,
+        error: streamError,
+      } = await supabaseAdmin
+        .from("live_streams")
+        .select("id, user_id, title, status, is_active")
+        .eq("id", streamId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (streamError) {
+        console.error(
+          "Live stream lookup failed:",
+          streamError.message
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify live stream.",
+        });
+      }
+
+      if (
+        !stream ||
+        stream.status !== "live" ||
+        stream.is_active !== true
+      ) {
+        return res.status(403).json({
+          success: false,
+          error: "This live stream is not active or authorized.",
+        });
+      }
+
+      // ==========================================
+      // 👤 GET HOST NAME
+      // ==========================================
+
+      const {
+        data: profile,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      const hostName =
+        profile?.full_name || "A Nasara seller";
+
+      // ==========================================
+      // 🔔 BUILD NOTIFICATION
+      // ==========================================
+
+      const notificationTitle =
+        `🔴 ${hostName} is Live on Nasara`;
+
+      const notificationBody =
+        stream.title ||
+        "Join the live broadcast on Nasara.";
+
+      const notificationUrl =
+        `/browse?live=${encodeURIComponent(stream.id)}`;
+
+      // ==========================================
+      // 🌐 SEND TO WEB SUBSCRIBERS
+      // ==========================================
+
+      let browserResult = {
+        sent: 0,
+        failed: 0,
+      };
+
+      try {
+        browserResult =
+          await broadcastBrowserPush(
+            notificationTitle,
+            notificationBody,
+            notificationUrl,
+            user.id
+          );
+      } catch (browserError) {
+        console.error(
+          "Live browser push failed:",
+          browserError.message
+        );
+      }
+
+      // ==========================================
+      // 📱 SEND TO EXPO APP USERS
+      // ==========================================
+
+      let mobileSent = false;
+
+      try {
+        const {
+          data: appUsers,
+          error: appUsersError,
+        } = await supabaseAdmin
+          .from("profiles")
+          .select("push_token")
+          .neq("id", user.id)
+          .not("push_token", "is", null);
+
+        if (appUsersError) {
+          throw appUsersError;
+        }
+
+        const tokens = [
+          ...new Set(
+            (appUsers || [])
+              .map((item) => item.push_token)
+              .filter(
+                (token) =>
+                  typeof token === "string" &&
+                  token.startsWith("ExponentPushToken")
+              )
+          ),
+        ];
+
+        if (tokens.length > 0) {
+          await sendPush(
+            tokens,
+            notificationTitle,
+            notificationBody,
+            {
+              type: "live_stream",
+              stream_id: stream.id,
+              url: notificationUrl,
+            }
+          );
+
+          mobileSent = true;
+        }
+      } catch (mobileError) {
+        console.error(
+          "Live Expo push failed:",
+          mobileError.message
+        );
+      }
+
+      // ==========================================
+      // ✅ RETURN RESULT
+      // ==========================================
+
+      return res.json({
+        success: true,
+        message: "Live notifications processed.",
+        browser: browserResult,
+        mobileSent,
+      });
+    } catch (error) {
+      console.error(
+        "Live notification error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not process live notifications.",
+      });
+    }
+  }
+);
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
