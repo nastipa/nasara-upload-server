@@ -31,6 +31,10 @@ app.use(
   })
 );
 
+// 🔵 INTERNATIONAL PHONE NUMBER SUPPORT
+const {
+  parsePhoneNumberFromString,
+} = require("libphonenumber-js");
 /* ================= LIMIT FILE SIZE (20MB) ================= */
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -5007,6 +5011,632 @@ app.post(
       return res.status(500).json({
         success: false,
         error: "Could not process live notifications.",
+      });
+    }
+  }
+);
+
+// ============================================================
+// 📇 NASARA CONTACTS — BACKEND
+// 🔵 Uses existing supabaseAdmin
+// 🔵 Does not create chat rooms
+// ============================================================
+
+
+// ==========================================
+// 🔐 AUTHENTICATE CONTACTS REQUEST
+// ==========================================
+
+async function authenticateContactsRequest(req, res) {
+  const authorization =
+    req.headers.authorization || "";
+
+  if (!authorization.startsWith("Bearer ")) {
+    res.status(401).json({
+      success: false,
+      error: "Authentication required.",
+    });
+
+    return null;
+  }
+
+  const accessToken =
+    authorization.slice(7).trim();
+
+  const {
+    data,
+    error,
+  } = await supabaseAdmin.auth.getUser(accessToken);
+
+  if (error || !data?.user) {
+    res.status(401).json({
+      success: false,
+      error: "Invalid or expired session.",
+    });
+
+    return null;
+  }
+
+  return data.user;
+}
+
+
+// ==========================================
+// 📞 NORMALIZE PHONE NUMBER
+// ==========================================
+
+function normalizeNasaraPhone(
+  phone,
+  defaultCountry = "GH"
+) {
+  if (
+    typeof phone !== "string" ||
+    !phone.trim()
+  ) {
+    return null;
+  }
+
+  try {
+    const cleanedPhone =
+      phone.trim().replace(/[^\d+]/g, "");
+
+    const parsed =
+      parsePhoneNumberFromString(
+        cleanedPhone,
+        defaultCountry
+      );
+
+    if (!parsed || !parsed.isValid()) {
+      return null;
+    }
+
+    return parsed.number;
+  } catch (error) {
+    return null;
+  }
+}
+
+
+// ==========================================
+// 👤 SAFE PUBLIC CONTACT PROFILE
+// ==========================================
+
+function safeContactProfile(profile) {
+  if (!profile) return null;
+
+  return {
+    id: profile.id,
+    full_name: profile.full_name || "Nasara User",
+    avatar_url: profile.avatar_url || null,
+    verified: profile.verified === true,
+  };
+}
+
+
+// ============================================================
+// 📇 GET MY CONTACTS
+// GET /contacts
+// ============================================================
+
+app.get(
+  "/contacts",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateContactsRequest(req, res);
+
+      if (!user) return;
+
+      const {
+        data: savedContacts,
+        error: contactsError,
+      } = await supabaseAdmin
+        .from("user_contacts")
+        .select("contact_user_id, created_at")
+        .eq("owner_user_id", user.id)
+        .order("created_at", {
+          ascending: false,
+        });
+
+      if (contactsError) {
+        console.error(
+          "Contacts retrieval error:",
+          contactsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not load your contacts.",
+        });
+      }
+
+      const contactIds =
+        (savedContacts || []).map(
+          (item) => item.contact_user_id
+        );
+
+      if (contactIds.length === 0) {
+        return res.json({
+          success: true,
+          contacts: [],
+        });
+      }
+
+      const {
+        data: profiles,
+        error: profilesError,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select(
+          "id, full_name, avatar_url, verified"
+        )
+        .in("id", contactIds);
+
+      if (profilesError) {
+        console.error(
+          "Contact profile lookup error:",
+          profilesError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not load contact profiles.",
+        });
+      }
+
+      const profileMap = new Map(
+        (profiles || []).map((profile) => [
+          profile.id,
+          safeContactProfile(profile),
+        ])
+      );
+
+      const contacts =
+        (savedContacts || [])
+          .map((item) => ({
+            ...profileMap.get(item.contact_user_id),
+            created_at: item.created_at,
+          }))
+          .filter((item) => item.id);
+
+      return res.json({
+        success: true,
+        contacts,
+      });
+    } catch (error) {
+      console.error(
+        "GET contacts error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not load contacts.",
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// 🔎 LOOK UP NASARA USERS BY PHONE NUMBER
+// POST /contacts/lookup
+// ============================================================
+
+app.post(
+  "/contacts/lookup",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateContactsRequest(req, res);
+
+      if (!user) return;
+
+      const inputNumbers =
+        Array.isArray(req.body?.phone_numbers)
+          ? req.body.phone_numbers
+          : [req.body?.phone_number];
+
+      if (
+        inputNumbers.length === 0 ||
+        inputNumbers.length > 100
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Submit between 1 and 100 phone numbers.",
+        });
+      }
+
+      const defaultCountry =
+        String(
+          req.body?.default_country || "GH"
+        ).toUpperCase();
+
+      if (!/^[A-Z]{2}$/.test(defaultCountry)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid default country code.",
+        });
+      }
+
+      // ==========================================
+      // 📞 NORMALIZE SUBMITTED NUMBERS
+      // ==========================================
+
+      const normalizedNumbers = [
+        ...new Set(
+          inputNumbers
+            .map((phone) =>
+              normalizeNasaraPhone(
+                phone,
+                defaultCountry
+              )
+            )
+            .filter(Boolean)
+        ),
+      ];
+
+      if (normalizedNumbers.length === 0) {
+        return res.json({
+          success: true,
+          matches: [],
+          message: "No valid phone numbers found.",
+        });
+      }
+
+      // ==========================================
+      // 🔐 ONLY MATCH USERS WHO OPTED IN
+      // ==========================================
+
+      const {
+        data: profiles,
+        error: profilesError,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select(
+          "id, full_name, avatar_url, verified, phone"
+        )
+        .eq("phone_discoverable", true)
+        .not("phone", "is", null)
+        .limit(10000);
+
+      if (profilesError) {
+        console.error(
+          "Phone discovery error:",
+          profilesError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not search Nasara contacts.",
+        });
+      }
+
+      // ==========================================
+      // 🔎 MATCH NORMALIZED PHONE NUMBERS
+      // ==========================================
+
+      const submittedSet =
+        new Set(normalizedNumbers);
+
+      const matches = [];
+
+      for (const profile of profiles || []) {
+        // Do not return the signed-in user.
+        if (profile.id === user.id) {
+          continue;
+        }
+
+        const storedNumber =
+          normalizeNasaraPhone(
+            profile.phone,
+            defaultCountry
+          );
+
+        if (
+          storedNumber &&
+          submittedSet.has(storedNumber)
+        ) {
+          matches.push(
+            safeContactProfile(profile)
+          );
+        }
+      }
+
+      // ==========================================
+      // 🔐 REMOVE ALREADY SAVED CONTACTS
+      // ==========================================
+
+      const {
+        data: existingContacts,
+        error: existingError,
+      } = await supabaseAdmin
+        .from("user_contacts")
+        .select("contact_user_id")
+        .eq("owner_user_id", user.id);
+
+      if (existingError) {
+        console.error(
+          "Existing contacts lookup error:",
+          existingError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not check saved contacts.",
+        });
+      }
+
+      const existingIds = new Set(
+        (existingContacts || []).map(
+          (item) => item.contact_user_id
+        )
+      );
+
+      const filteredMatches =
+        matches.filter(
+          (profile) => !existingIds.has(profile.id)
+        );
+
+      return res.json({
+        success: true,
+        matches: filteredMatches,
+        count: filteredMatches.length,
+      });
+    } catch (error) {
+      console.error(
+        "Phone lookup error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Phone lookup failed.",
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// ➕ ADD CONTACT
+// POST /contacts/add
+// ============================================================
+
+app.post(
+  "/contacts/add",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateContactsRequest(req, res);
+
+      if (!user) return;
+
+      const contactUserId =
+        String(
+          req.body?.contact_user_id || ""
+        ).trim();
+
+      if (!contactUserId) {
+        return res.status(400).json({
+          success: false,
+          error: "Contact user ID is required.",
+        });
+      }
+
+      if (contactUserId === user.id) {
+        return res.status(400).json({
+          success: false,
+          error: "You cannot add yourself.",
+        });
+      }
+
+      // ==========================================
+      // 👤 VERIFY CONTACT EXISTS
+      // ==========================================
+
+      const {
+        data: contactProfile,
+        error: profileError,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select("id, full_name, avatar_url, verified")
+        .eq("id", contactUserId)
+        .maybeSingle();
+
+      if (profileError || !contactProfile) {
+        return res.status(404).json({
+          success: false,
+          error: "Nasara user was not found.",
+        });
+      }
+
+      // ==========================================
+      // 💾 SAVE CONTACT
+      // ==========================================
+
+      const {
+        data: savedContact,
+        error: saveError,
+      } = await supabaseAdmin
+        .from("user_contacts")
+        .upsert(
+          {
+            owner_user_id: user.id,
+            contact_user_id: contactUserId,
+          },
+          {
+            onConflict:
+              "owner_user_id,contact_user_id",
+            ignoreDuplicates: true,
+          }
+        )
+        .select("id, created_at")
+        .maybeSingle();
+
+      if (saveError) {
+        console.error(
+          "Add contact error:",
+          saveError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not add contact.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Contact added successfully.",
+        contact: {
+          ...safeContactProfile(contactProfile),
+          created_at:
+            savedContact?.created_at || null,
+        },
+      });
+    } catch (error) {
+      console.error(
+        "Add contact error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not add contact.",
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// ➖ REMOVE CONTACT
+// DELETE /contacts/:contactUserId
+// ============================================================
+
+app.delete(
+  "/contacts/:contactUserId",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateContactsRequest(req, res);
+
+      if (!user) return;
+
+      const contactUserId =
+        String(
+          req.params.contactUserId || ""
+        ).trim();
+
+      if (!contactUserId) {
+        return res.status(400).json({
+          success: false,
+          error: "Contact user ID is required.",
+        });
+      }
+
+      const {
+        error: deleteError,
+      } = await supabaseAdmin
+        .from("user_contacts")
+        .delete()
+        .eq("owner_user_id", user.id)
+        .eq("contact_user_id", contactUserId);
+
+      if (deleteError) {
+        console.error(
+          "Remove contact error:",
+          deleteError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not remove contact.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        message: "Contact removed.",
+      });
+    } catch (error) {
+      console.error(
+        "Remove contact error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not remove contact.",
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// 🔐 PHONE DISCOVERY — OPT IN / OPT OUT
+// PATCH /contacts/discovery
+// ============================================================
+
+app.patch(
+  "/contacts/discovery",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateContactsRequest(req, res);
+
+      if (!user) return;
+
+      const enabled =
+        req.body?.enabled;
+
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({
+          success: false,
+          error: "enabled must be true or false.",
+        });
+      }
+
+      const {
+        error: updateError,
+      } = await supabaseAdmin
+        .from("profiles")
+        .update({
+          phone_discoverable: enabled,
+        })
+        .eq("id", user.id);
+
+      if (updateError) {
+        console.error(
+          "Phone discovery update error:",
+          updateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not update discovery setting.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        phone_discoverable: enabled,
+        message: enabled
+          ? "Phone discovery enabled."
+          : "Phone discovery disabled.",
+      });
+    } catch (error) {
+      console.error(
+        "Phone discovery setting error:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not update discovery setting.",
       });
     }
   }
