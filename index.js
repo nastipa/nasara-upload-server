@@ -5017,9 +5017,13 @@ app.post(
 );
 
 // ============================================================
-// 📇 NASARA CONTACTS — BACKEND
+// 📇 NASARA CONTACTS — SECURE BACKEND
 // 🔵 Uses existing supabaseAdmin
+// 🔵 Uses existing verified phone numbers
+// 🔵 Supports Ghanaian and international phone formats
+// 🔵 Protects election phone identity
 // 🔵 Does not create chat rooms
+// 🔵 Does not expose phone numbers
 // ============================================================
 
 
@@ -5090,6 +5094,7 @@ function normalizeNasaraPhone(
       return null;
     }
 
+    // Always return international E.164 format.
     return parsed.number;
   } catch (error) {
     return null;
@@ -5114,7 +5119,7 @@ function safeContactProfile(profile) {
 
 
 // ============================================================
-// 📇 GET MY CONTACTS
+// 📇 GET MY SAVED CONTACTS
 // GET /contacts
 // ============================================================
 
@@ -5126,6 +5131,10 @@ app.get(
         await authenticateContactsRequest(req, res);
 
       if (!user) return;
+
+      // ==========================================
+      // 📂 GET CONTACT RELATIONSHIPS
+      // ==========================================
 
       const {
         data: savedContacts,
@@ -5162,15 +5171,22 @@ app.get(
         });
       }
 
+      // ==========================================
+      // 🔐 ONLY RETURN VERIFIED ACCOUNTS
+      // Existing contacts remain visible even if
+      // phone discovery is later disabled.
+      // ==========================================
+
       const {
         data: profiles,
         error: profilesError,
       } = await supabaseAdmin
         .from("profiles")
         .select(
-          "id, full_name, avatar_url, verified"
+          "id, full_name, avatar_url, verified, phone_verified"
         )
-        .in("id", contactIds);
+        .in("id", contactIds)
+        .eq("phone_verified", true);
 
       if (profilesError) {
         console.error(
@@ -5193,16 +5209,25 @@ app.get(
 
       const contacts =
         (savedContacts || [])
-          .map((item) => ({
-            ...profileMap.get(item.contact_user_id),
-            created_at: item.created_at,
-          }))
-          .filter((item) => item.id);
+          .map((item) => {
+            const profile =
+              profileMap.get(item.contact_user_id);
+
+            if (!profile) return null;
+
+            return {
+              ...profile,
+              created_at: item.created_at,
+            };
+          })
+          .filter(Boolean);
 
       return res.json({
         success: true,
         contacts,
+        count: contacts.length,
       });
+
     } catch (error) {
       console.error(
         "GET contacts error:",
@@ -5231,6 +5256,10 @@ app.post(
         await authenticateContactsRequest(req, res);
 
       if (!user) return;
+
+      // ==========================================
+      // 📥 ACCEPT PHONE NUMBERS
+      // ==========================================
 
       const inputNumbers =
         Array.isArray(req.body?.phone_numbers)
@@ -5281,12 +5310,13 @@ app.post(
         return res.json({
           success: true,
           matches: [],
+          count: 0,
           message: "No valid phone numbers found.",
         });
       }
 
       // ==========================================
-      // 🔐 ONLY MATCH USERS WHO OPTED IN
+      // 🔐 MATCH ONLY VERIFIED AND OPTED-IN USERS
       // ==========================================
 
       const {
@@ -5297,6 +5327,7 @@ app.post(
         .select(
           "id, full_name, avatar_url, verified, phone"
         )
+        .eq("phone_verified", true)
         .eq("phone_discoverable", true)
         .not("phone", "is", null)
         .limit(10000);
@@ -5323,7 +5354,7 @@ app.post(
       const matches = [];
 
       for (const profile of profiles || []) {
-        // Do not return the signed-in user.
+        // Never return the signed-in user.
         if (profile.id === user.id) {
           continue;
         }
@@ -5384,6 +5415,7 @@ app.post(
         matches: filteredMatches,
         count: filteredMatches.length,
       });
+
     } catch (error) {
       console.error(
         "Phone lookup error:",
@@ -5433,7 +5465,8 @@ app.post(
       }
 
       // ==========================================
-      // 👤 VERIFY CONTACT EXISTS
+      // 🔐 VERIFY TARGET ACCOUNT
+      // Must be phone-verified and opted in.
       // ==========================================
 
       const {
@@ -5441,19 +5474,38 @@ app.post(
         error: profileError,
       } = await supabaseAdmin
         .from("profiles")
-        .select("id, full_name, avatar_url, verified")
+        .select(
+          "id, full_name, avatar_url, verified, phone_verified, phone_discoverable"
+        )
         .eq("id", contactUserId)
+        .eq("phone_verified", true)
+        .eq("phone_discoverable", true)
         .maybeSingle();
 
-      if (profileError || !contactProfile) {
+      if (profileError) {
+        console.error(
+          "Contact verification error:",
+          profileError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify contact account.",
+        });
+      }
+
+      if (!contactProfile) {
         return res.status(404).json({
           success: false,
-          error: "Nasara user was not found.",
+          error:
+            "Verified contact not found or unavailable.",
         });
       }
 
       // ==========================================
-      // 💾 SAVE CONTACT
+      // 💾 SAVE CONTACT RELATIONSHIP
+      // No phone number is modified.
+      // No chat room is created.
       // ==========================================
 
       const {
@@ -5496,6 +5548,7 @@ app.post(
             savedContact?.created_at || null,
         },
       });
+
     } catch (error) {
       console.error(
         "Add contact error:",
@@ -5537,6 +5590,7 @@ app.delete(
         });
       }
 
+      // Only the owner can remove their contact.
       const {
         error: deleteError,
       } = await supabaseAdmin
@@ -5561,6 +5615,7 @@ app.delete(
         success: true,
         message: "Contact removed.",
       });
+
     } catch (error) {
       console.error(
         "Remove contact error:",
@@ -5600,14 +5655,30 @@ app.patch(
         });
       }
 
+      // ==========================================
+      // 🔐 ONLY VERIFIED USERS CAN OPT IN
+      // Opting out is always allowed.
+      // ==========================================
+
+      let updateQuery =
+        supabaseAdmin
+          .from("profiles")
+          .update({
+            phone_discoverable: enabled,
+          })
+          .eq("id", user.id);
+
+      if (enabled === true) {
+        updateQuery =
+          updateQuery.eq("phone_verified", true);
+      }
+
       const {
+        data: updatedProfile,
         error: updateError,
-      } = await supabaseAdmin
-        .from("profiles")
-        .update({
-          phone_discoverable: enabled,
-        })
-        .eq("id", user.id);
+      } = await updateQuery
+        .select("id")
+        .maybeSingle();
 
       if (updateError) {
         console.error(
@@ -5621,6 +5692,14 @@ app.patch(
         });
       }
 
+      if (!updatedProfile) {
+        return res.status(403).json({
+          success: false,
+          error:
+            "You must verify your phone number before enabling phone discovery.",
+        });
+      }
+
       return res.json({
         success: true,
         phone_discoverable: enabled,
@@ -5628,6 +5707,7 @@ app.patch(
           ? "Phone discovery enabled."
           : "Phone discovery disabled.",
       });
+
     } catch (error) {
       console.error(
         "Phone discovery setting error:",
@@ -5641,6 +5721,7 @@ app.patch(
     }
   }
 );
+
 /* ================= HOSPITAL ROUTES ================= */
 app.use("/hospital", hospitalRoutes);
 
