@@ -5316,21 +5316,21 @@ app.post(
       }
 
       // ==========================================
-      // 🔐 MATCH ONLY VERIFIED AND OPTED-IN USERS
-      // ==========================================
+// 🔐 MATCH ALL VERIFIED NASARA USERS
+// No discovery toggle required.
+// ==========================================
 
-      const {
-        data: profiles,
-        error: profilesError,
-      } = await supabaseAdmin
-        .from("profiles")
-        .select(
-          "id, full_name, avatar_url, verified, phone"
-        )
-        .eq("phone_verified", true)
-        .eq("phone_discoverable", true)
-        .not("phone", "is", null)
-        .limit(10000);
+const {
+  data: profiles,
+  error: profilesError,
+} = await supabaseAdmin
+  .from("profiles")
+  .select(
+    "id, full_name, avatar_url, verified, phone"
+  )
+  .eq("phone_verified", true)
+  .not("phone", "is", null)
+  .limit(10000);
 
       if (profilesError) {
         console.error(
@@ -5465,22 +5465,21 @@ app.post(
       }
 
       // ==========================================
-      // 🔐 VERIFY TARGET ACCOUNT
-      // Must be phone-verified and opted in.
-      // ==========================================
+// 🔐 VERIFY TARGET NASARA ACCOUNT
+// Only phone verification is required.
+// ==========================================
 
-      const {
-        data: contactProfile,
-        error: profileError,
-      } = await supabaseAdmin
-        .from("profiles")
-        .select(
-          "id, full_name, avatar_url, verified, phone_verified, phone_discoverable"
-        )
-        .eq("id", contactUserId)
-        .eq("phone_verified", true)
-        .eq("phone_discoverable", true)
-        .maybeSingle();
+const {
+  data: contactProfile,
+  error: profileError,
+} = await supabaseAdmin
+  .from("profiles")
+  .select(
+    "id, full_name, avatar_url, verified, phone_verified"
+  )
+  .eq("id", contactUserId)
+  .eq("phone_verified", true)
+  .maybeSingle();
 
       if (profileError) {
         console.error(
