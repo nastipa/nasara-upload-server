@@ -3946,7 +3946,9 @@ const senderName =
   chatSender?.full_name?.trim() || "A Nasara User";
 
 const senderAvatar =
-  chatSender?.avatar_url || "/favicon.ico";
+  chatSender?.avatar_url || null;
+
+console.log("🟢 CHAT SENDER AVATAR:", senderAvatar);
 
 const notificationTitle = `💬 ${senderName}`;
 
@@ -3974,6 +3976,7 @@ const browserResult = await sendBrowserPushToUser(
   `/chat/${message.room_id}`,
   {
     icon: senderAvatar,
+    image: senderAvatar,
     tag: `nasara-chat-${message.room_id}`,
     room_id: message.room_id,
   }

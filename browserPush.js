@@ -64,7 +64,7 @@ async function sendBrowserPushToUser(
   }
 
   const {
-    icon = "/favicon.ico",
+    icon = null,
     tag = `nasara-notification-${Date.now()}`,
     room_id = null,
     image = null,
@@ -100,17 +100,17 @@ async function sendBrowserPushToUser(
       await webpush.sendNotification(
         record.subscription,
         JSON.stringify({
-          title,
-          body,
-          icon,
-          image,
-          tag,
-          url,
-          data: {
-            url,
-            room_id,
-          },
-        })
+  title,
+  body,
+  ...(icon ? { icon } : {}),
+  ...(image ? { image } : {}),
+  tag,
+  url,
+  data: {
+    url,
+    room_id,
+  },
+})
       );
 
       sent++;
