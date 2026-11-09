@@ -1,14 +1,14 @@
-// =====================================================
-// NASARA BROWSER PUSH NOTIFICATIONS
-// File: browserPush.js
-// =====================================================
+// 🟣 =====================================================
+// 🟣 NASARA BROWSER PUSH NOTIFICATIONS
+// 🟣 Sender Profile Image • Message Preview • Chat Navigation
+// 🟣 =====================================================
 
 const webpush = require("web-push");
 const { createClient } = require("@supabase/supabase-js");
 
-// =====================================================
-// 1. INITIALIZE SUPABASE ADMIN CLIENT
-// =====================================================
+// 🔵 =====================================================
+// 🔵 1. INITIALIZE SUPABASE ADMIN CLIENT
+// 🔵 =====================================================
 
 if (!process.env.SUPABASE_URL) {
   throw new Error("Missing SUPABASE_URL environment variable.");
@@ -25,9 +25,9 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// =====================================================
-// 2. CONFIGURE VAPID
-// =====================================================
+// 🟣 =====================================================
+// 🟣 2. CONFIGURE VAPID
+// 🟣 =====================================================
 
 const vapidPublicKey = process.env.VAPID_PUBLIC_KEY;
 const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY;
@@ -45,15 +45,17 @@ webpush.setVapidDetails(
   vapidPrivateKey
 );
 
-// =====================================================
-// 3. SEND A BROWSER PUSH NOTIFICATION TO ONE USER
-// =====================================================
+// 🟢 =====================================================
+// 🟢 3. SEND BROWSER PUSH TO ONE USER
+// 🟢 Supports sender image and chat navigation
+// 🟢 =====================================================
 
 async function sendBrowserPushToUser(
   userId,
   title,
   body,
-  url = "/"
+  url = "/",
+  options = {}
 ) {
   if (!userId || !title || !body) {
     throw new Error(
@@ -61,7 +63,17 @@ async function sendBrowserPushToUser(
     );
   }
 
-  const { data: subscriptions, error } = await supabaseAdmin
+  const {
+    icon = "/favicon.ico",
+    tag = `nasara-notification-${Date.now()}`,
+    room_id = null,
+    image = null,
+  } = options;
+
+  const {
+    data: subscriptions,
+    error,
+  } = await supabaseAdmin
     .from("browser_push_subscriptions")
     .select("id, subscription")
     .eq("user_id", userId);
@@ -90,7 +102,14 @@ async function sendBrowserPushToUser(
         JSON.stringify({
           title,
           body,
+          icon,
+          image,
+          tag,
           url,
+          data: {
+            url,
+            room_id,
+          },
         })
       );
 
@@ -104,10 +123,13 @@ async function sendBrowserPushToUser(
         error.message
       );
 
-      // Remove subscriptions that the push service
-      // confirms are expired or no longer valid.
-      if (error.statusCode === 404 || error.statusCode === 410) {
-        const { error: deleteError } = await supabaseAdmin
+      if (
+        error.statusCode === 404 ||
+        error.statusCode === 410
+      ) {
+        const {
+          error: deleteError,
+        } = await supabaseAdmin
           .from("browser_push_subscriptions")
           .delete()
           .eq("id", record.id);
@@ -129,10 +151,10 @@ async function sendBrowserPushToUser(
   };
 }
 
-// =====================================================
-// 4. SEND BROWSER PUSH TO ALL SUBSCRIBERS
-// EXCEPT THE USER WHO POSTED THE ITEM
-// =====================================================
+// 🟡 =====================================================
+// 🟡 4. SEND BROADCAST NOTIFICATIONS
+// 🟡 Existing item notifications remain supported
+// 🟡 =====================================================
 
 async function broadcastBrowserPush(
   title,
@@ -148,12 +170,14 @@ async function broadcastBrowserPush(
     .from("browser_push_subscriptions")
     .select("id, user_id, subscription");
 
-  // Exclude the user who posted the item.
   if (excludeUserId) {
     query = query.neq("user_id", excludeUserId);
   }
 
-  const { data: subscriptions, error } = await query;
+  const {
+    data: subscriptions,
+    error,
+  } = await query;
 
   if (error) {
     throw new Error(
@@ -180,7 +204,11 @@ async function broadcastBrowserPush(
           title,
           body,
           url,
+          icon: "/favicon.ico",
           tag: `nasara-item-${Date.now()}`,
+          data: {
+            url,
+          },
         })
       );
 
@@ -194,12 +222,13 @@ async function broadcastBrowserPush(
         error.message
       );
 
-      // Remove expired browser subscriptions.
       if (
         error.statusCode === 404 ||
         error.statusCode === 410
       ) {
-        const { error: deleteError } = await supabaseAdmin
+        const {
+          error: deleteError,
+        } = await supabaseAdmin
           .from("browser_push_subscriptions")
           .delete()
           .eq("id", record.id);
@@ -221,9 +250,9 @@ async function broadcastBrowserPush(
   };
 }
 
-// =====================================================
-// 5. EXPORT FUNCTIONS FOR THE NASARA BACKEND
-// =====================================================
+// 🔵 =====================================================
+// 🔵 5. EXPORT FUNCTIONS
+// 🔵 =====================================================
 
 module.exports = {
   sendBrowserPushToUser,

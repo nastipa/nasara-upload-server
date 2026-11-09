@@ -3922,52 +3922,61 @@ console.log("🟢 CHAT ROOM PARTICIPANTS VERIFIED:", {
   senderId,
   recipientId: recipient_id,
 });
-/* 🟡 =====================================================
-💬 5. PREPARE THE BROWSER NOTIFICATION WITH SENDER NAME
-===================================================== */
+// 🟣 =====================================================
+// 🟣 5. GET SENDER NAME AND PROFILE IMAGE
+// 🟣 =====================================================
 
-// 👤 GET THE SENDER’S NAME FROM THE PROFILES TABLE
 const {
-data: chatSender,
-error: chatSenderError,
+  data: chatSender,
+  error: chatSenderError,
 } = await supabaseAdmin
-.from("profiles")
-.select("full_name")
-.eq("id", message.sender_id)
-.maybeSingle();
+  .from("profiles")
+  .select("full_name, avatar_url")
+  .eq("id", message.sender_id)
+  .maybeSingle();
 
-// 🔴 LOG PROFILE LOOKUP ERRORS WITHOUT STOPPING THE MESSAGE
 if (chatSenderError) {
-console.error(
-"🔴 CHAT SENDER PROFILE LOOKUP ERROR:",
-chatSenderError.message
-);
+  console.error(
+    "🔴 CHAT SENDER PROFILE LOOKUP ERROR:",
+    chatSenderError.message
+  );
 }
 
-// 🟢 USE THE SENDER’S NAME, WITH A FALLBACK
 const senderName =
-chatSender?.full_name?.trim() || "A Nasara User";
+  chatSender?.full_name?.trim() || "A Nasara User";
 
-// 🔔 SHOW THE ACTUAL SENDER’S NAME AS THE NOTIFICATION TITLE
+const senderAvatar =
+  chatSender?.avatar_url || "/favicon.ico";
+
 const notificationTitle = `💬 ${senderName}`;
 
-// 💬 CHOOSE THE NOTIFICATION BODY BASED ON MESSAGE TYPE
 const notificationBody =
-typeof message.text === "string" && message.text.trim()
-? message.text.trim().slice(0, 160)
-: message.image_url
-? "🖼️ Sent you a photo"
-: message.audio_url
-? "🎤 Sent you a voice note"
-: message.file_url
-? `📎 Sent you a file${message.file_name ?` : ${message.file_name}` : ""}`
-: "📩 Sent you a new message";
-/* 🔵 6. SEND ONLY TO THE RECIPIENT'S WEBSITE BROWSERS */
+  typeof message.text === "string" && message.text.trim()
+    ? message.text.trim().slice(0, 160)
+    : message.image_url
+    ? "🖼️ Sent you a photo"
+    : message.audio_url
+    ? "🎤 Sent you a voice note"
+    : message.file_url
+    ? `📎 Sent you a file${
+        message.file_name ? `: ${message.file_name}` : ""
+      }`
+    : "📩 Sent you a new message";
+
+// 🟢 =====================================================
+// 🟢 6. SEND CHAT NOTIFICATION WITH PROFILE IMAGE
+// 🟢 =====================================================
+
 const browserResult = await sendBrowserPushToUser(
   recipient_id,
   notificationTitle,
   notificationBody,
-  `/chat/${message.room_id}`
+  `/chat/${message.room_id}`,
+  {
+    icon: senderAvatar,
+    tag: `nasara-chat-${message.room_id}`,
+    room_id: message.room_id,
+  }
 );
 /* 🟢 7. LOG THE RESULT */
 console.log("💬 CHAT BROWSER PUSH RESULT:", {
@@ -6838,7 +6847,7 @@ app.get("/", (req, res) => {
 const cron = require("node-cron");
 
 // Ghana uses Africa/Accra time.
-const FRIDAY_MARKET_CRON = "30 7 * * 5";
+const FRIDAY_MARKET_CRON = "0 9 * * 5";
 
 let fridayMarketReminderRunning = false;
 
