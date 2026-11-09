@@ -70,6 +70,9 @@ async function sendBrowserPushToUser(
     image = null,
   } = options;
 
+  console.log("🟢 PUSH ICON URL:", icon);
+console.log("🟢 PUSH IMAGE URL:", image);
+
   const {
     data: subscriptions,
     error,
