@@ -4006,6 +4006,276 @@ return res.status(500).json({
 }
 });
 
+/* 🟣 =====================================================
+💬 NASARA GROUP CHAT BROWSER PUSH NOTIFICATIONS
+🟣 Sender Profile Image • Message Preview • Group Navigation
+===================================================== */
+
+app.post("/group-browser-push", async (req, res) => {
+  console.log("💬 GROUP BROWSER PUSH ROUTE HIT:", {
+    hasAuthorization: Boolean(req.headers.authorization),
+    body: req.body,
+  });
+
+  try {
+    // 🔵 1. VERIFY AUTHENTICATION
+
+    const authorization = req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication is required.",
+      });
+    }
+
+    const token = authorization.slice(7).trim();
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid authentication token.",
+      });
+    }
+
+    const {
+      data: authData,
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Your session is invalid or has expired.",
+      });
+    }
+
+    const senderId = authData.user.id;
+
+    // 🟣 2. VALIDATE MESSAGE ID
+
+    const { message_id } = req.body || {};
+
+    if (
+      !(
+        typeof message_id === "string" ||
+        (typeof message_id === "number" &&
+          Number.isFinite(message_id))
+      ) ||
+      String(message_id).trim() === ""
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "A valid group message ID is required.",
+      });
+    }
+
+    // 🔵 3. VERIFY THE GROUP MESSAGE
+
+    const {
+      data: message,
+      error: messageError,
+    } = await supabaseAdmin
+      .from("group_messages")
+      .select(
+        "id, group_id, sender_id, text, image_url, audio_url, file_url, file_name"
+      )
+      .eq("id", message_id)
+      .maybeSingle();
+
+    if (messageError) {
+      console.error("🔴 GROUP MESSAGE LOOKUP ERROR:", messageError);
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not verify the group message.",
+      });
+    }
+
+    if (!message || message.sender_id !== senderId) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not authorized to notify users about this message.",
+      });
+    }
+
+    if (!message.group_id) {
+      return res.status(400).json({
+        success: false,
+        error: "The message does not have a valid group.",
+      });
+    }
+
+    // 🟣 4. VERIFY THE SENDER IS A GROUP MEMBER
+
+    const {
+      data: senderMembership,
+      error: senderMembershipError,
+    } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", message.group_id)
+      .eq("user_id", senderId)
+      .maybeSingle();
+
+    if (senderMembershipError) {
+      console.error(
+        "🔴 GROUP SENDER MEMBERSHIP ERROR:",
+        senderMembershipError
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not verify group membership.",
+      });
+    }
+
+    if (!senderMembership) {
+      return res.status(403).json({
+        success: false,
+        error: "You are not a member of this group.",
+      });
+    }
+
+    // 🟢 5. GET OTHER GROUP MEMBERS
+
+    const {
+      data: members,
+      error: membersError,
+    } = await supabaseAdmin
+      .from("group_members")
+      .select("user_id")
+      .eq("group_id", message.group_id)
+      .neq("user_id", senderId);
+
+    if (membersError) {
+      console.error("🔴 GROUP MEMBERS LOOKUP ERROR:", membersError);
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not load group members.",
+      });
+    }
+
+    const recipientIds = [
+      ...new Set(
+        (members || [])
+          .map((member) => member.user_id)
+          .filter((userId) => userId && userId !== senderId)
+      ),
+    ];
+
+    if (recipientIds.length === 0) {
+      return res.json({
+        success: true,
+        sent: 0,
+        failed: 0,
+        message: "There are no other group members to notify.",
+      });
+    }
+
+    // 🟣 6. GET SENDER PROFILE
+
+    const {
+      data: senderProfile,
+      error: profileError,
+    } = await supabaseAdmin
+      .from("profiles")
+      .select("full_name, avatar_url")
+      .eq("id", senderId)
+      .maybeSingle();
+
+    if (profileError) {
+      console.error(
+        "🔴 GROUP SENDER PROFILE ERROR:",
+        profileError.message
+      );
+    }
+
+    const senderName =
+      senderProfile?.full_name?.trim() || "A Nasara User";
+
+    const senderAvatar = senderProfile?.avatar_url || null;
+
+    // 🟡 7. PREPARE MESSAGE PREVIEW
+
+    const notificationTitle = `👥 ${senderName}`;
+
+    const notificationBody =
+      typeof message.text === "string" && message.text.trim()
+        ? message.text.trim().slice(0, 160)
+        : message.image_url
+        ? "🖼️ Shared a photo in the group"
+        : message.audio_url
+        ? "🎤 Sent a voice note in the group"
+        : message.file_url
+        ? `📎 Shared a file${
+            message.file_name ? `: ${message.file_name}` : ""
+          }`
+        : "📩 Sent a new group message";
+
+    // 🟢 8. SEND TO EVERY OTHER GROUP MEMBER
+
+    const notificationResults = await Promise.allSettled(
+      recipientIds.map((recipientId) =>
+        sendBrowserPushToUser(
+          recipientId,
+          notificationTitle,
+          notificationBody,
+          `/groups/${message.group_id}`,
+          {
+            icon: senderAvatar,
+            image: senderAvatar,
+            tag: `nasara-group-${message.group_id}`,
+            room_id: message.group_id,
+          }
+        )
+      )
+    );
+
+    let sent = 0;
+    let failed = 0;
+
+    for (const result of notificationResults) {
+      if (result.status === "fulfilled") {
+        sent += result.value.sent || 0;
+      } else {
+        failed++;
+
+        console.error(
+          "🔴 GROUP MEMBER NOTIFICATION ERROR:",
+          result.reason
+        );
+      }
+    }
+
+    // 🔵 9. RETURN RESULTS
+
+    console.log("🟢 GROUP BROWSER PUSH RESULT:", {
+      messageId: message.id,
+      groupId: message.group_id,
+      recipients: recipientIds.length,
+      sent,
+      failed,
+    });
+
+    return res.json({
+      success: true,
+      sent,
+      failed,
+      recipients: recipientIds.length,
+      message: "Group browser notifications processed.",
+    });
+
+  } catch (error) {
+    console.error("🔴 GROUP BROWSER PUSH ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      error: "Could not process the group browser notification.",
+    });
+  }
+});
 
 // ============================================================
 // 🟢 RESTAURANT NOTIFICATIONS — NEW ORDER
@@ -6886,7 +7156,7 @@ cron.schedule(
 
       const result = await broadcastBrowserPush(
         "🛍️ Nasara Friday Market Is Open!",
-        "It's Friday! Visit Nasara to discover products, connect with sellers, and explore Friday Market deals.",
+        "It's Friday! Visit Nasara to discover products, connect with sellers, and explore Friday Market discounted deals.",
         notificationUrl
       );
 
@@ -6922,6 +7192,6 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port " + PORT);
 
   console.log(
-    "🛍️ Friday Market reminder scheduled for Fridays at 6:00 AM Ghana time."
+    "🛍️ Friday Market reminder scheduled for Fridays at 9:00 AM Ghana time."
   );
 });
