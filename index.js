@@ -3981,6 +3981,21 @@ const browserResult = await sendBrowserPushToUser(
     room_id: message.room_id,
   }
 );
+
+// 🟢 SEND EXPO PUSH TO ANDROID RECIPIENTS
+let expoResult = null;
+
+try {
+  expoResult = await notifyUser(
+    recipient_id,
+    notificationTitle,
+    notificationBody
+  );
+
+  console.log("🟢 CHAT EXPO PUSH RESULT:", expoResult);
+} catch (expoError) {
+  console.error("🔴 CHAT EXPO PUSH ERROR:", expoError);
+}
 /* 🟢 7. LOG THE RESULT */
 console.log("💬 CHAT BROWSER PUSH RESULT:", {
   messageId: message.id,
@@ -3991,7 +4006,8 @@ console.log("💬 CHAT BROWSER PUSH RESULT:", {
 return res.json({
   success: true,
   browser: browserResult,
-  message: "Chat browser notification processed.",
+  expo: expoResult,
+  message: "Chat notifications processed.",
 });
 
 } catch (error) {
@@ -4232,6 +4248,41 @@ app.post("/group-browser-push", async (req, res) => {
         )
       )
     );
+    // 🟢 =====================================================
+// 🟢 SEND EXPO PUSH TO ANDROID GROUP MEMBERS
+// 🟢 =====================================================
+
+const expoResults = await Promise.allSettled(
+  recipientIds.map(async (recipientId) => {
+    return await notifyUser(
+      recipientId,
+      notificationTitle,
+      notificationBody
+    );
+  })
+);
+
+let expoSent = 0;
+let expoFailed = 0;
+
+for (const result of expoResults) {
+  if (result.status === "fulfilled") {
+    expoSent++;
+  } else {
+    expoFailed++;
+
+    console.error(
+      "🔴 GROUP EXPO PUSH ERROR:",
+      result.reason
+    );
+  }
+}
+
+console.log("🟢 GROUP EXPO PUSH SUMMARY:", {
+  recipients: recipientIds.length,
+  expoSent,
+  expoFailed,
+});
 
     let sent = 0;
     let failed = 0;
@@ -4248,6 +4299,7 @@ app.post("/group-browser-push", async (req, res) => {
         );
       }
     }
+    
 
     // 🔵 9. RETURN RESULTS
 
@@ -4260,12 +4312,14 @@ app.post("/group-browser-push", async (req, res) => {
     });
 
     return res.json({
-      success: true,
-      sent,
-      failed,
-      recipients: recipientIds.length,
-      message: "Group browser notifications processed.",
-    });
+  success: true,
+  sent,
+  failed,
+  expoSent,
+  expoFailed,
+  recipients: recipientIds.length,
+  message: "Group browser and Expo notifications processed.",
+});
 
   } catch (error) {
     console.error("🔴 GROUP BROWSER PUSH ERROR:", error);
