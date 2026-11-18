@@ -4889,8 +4889,8 @@ app.post(
         `🌾 New Stock from ${farmName}!`;
 
       const body =
-        `${productName} has been added by ${farmName} on Nasara. +
-        quantityText`;
+        `${productName} has been added by ${farmName} on Nasara.` +
+        quantityText;
 
       // 🔗 FARM DESTINATION
       const url = stock.farm_id
@@ -7169,67 +7169,229 @@ app.get("/", (req, res) => {
 
 // ============================================================
 // 🛍️ NASARA FRIDAY MARKET AUTOMATIC REMINDER
+// 🛍️ ANDROID + WEB PUSH
+// 🛍️ FRIDAY 9:00 AM + RENDER STARTUP CATCH-UP
+// 🇬🇭 AFRICA/ACCRA TIMEZONE
 // ============================================================
 
 const cron = require("node-cron");
 
-// Ghana uses Africa/Accra time.
 const FRIDAY_MARKET_CRON = "0 9 * * 5";
 
 let fridayMarketReminderRunning = false;
 
-cron.schedule(
-  FRIDAY_MARKET_CRON,
-  async () => {
-    if (fridayMarketReminderRunning) {
-      console.log(
-        "🟡 Friday Market reminder is already running. Skipping."
-      );
-      return;
+// ------------------------------------------------------------
+// GHANA DATE AND TIME
+// ------------------------------------------------------------
+
+function getGhanaDateTime() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Accra",
+    weekday: "short",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(new Date());
+
+  const values = {};
+
+  for (const part of parts) {
+    values[part.type] = part.value;
+  }
+
+  return {
+    weekday: values.weekday,
+    date: `${values.year}-${values.month}-${values.day}`,
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+  };
+}
+
+// ------------------------------------------------------------
+// SEND FRIDAY MARKET NOTIFICATION
+// ------------------------------------------------------------
+
+async function sendFridayMarketReminder() {
+  if (fridayMarketReminderRunning) {
+    console.log("🟡 Friday Market reminder already running.");
+    return;
+  }
+
+  const ghanaTime = getGhanaDateTime();
+
+  if (ghanaTime.weekday !== "Fri") {
+    console.log("🟡 Today is not Friday. Skipping.");
+    return;
+  }
+
+  if (ghanaTime.hour < 9) {
+    console.log("🟡 Friday Market reminder time has not arrived.");
+    return;
+  }
+
+  fridayMarketReminderRunning = true;
+
+  const marketDate = ghanaTime.date;
+
+  let claimed = false;
+
+  const title = "🛍️ Nasara Friday Market Is Open!";
+
+  const body =
+    "It's Friday! Visit Nasara to discover products, connect with sellers, and explore Friday Market discounted deals.";
+
+  try {
+    console.log("================================================");
+    console.log("🛍️ FRIDAY MARKET REMINDER STARTED");
+    console.log("Ghana date:", marketDate);
+
+    // --------------------------------------------------------
+    // CLAIM THIS FRIDAY'S NOTIFICATION
+    // Prevent duplicate sends after Render restarts.
+    // --------------------------------------------------------
+
+    const { error: claimError } = await supabaseAdmin
+      .from("friday_market_notifications")
+      .insert({
+        market_date: marketDate,
+        status: "processing",
+      });
+
+    if (claimError) {
+      if (claimError.code === "23505") {
+        console.log(
+          "🟡 Friday Market notification already claimed:",
+          marketDate
+        );
+        return;
+      }
+
+      throw claimError;
     }
 
-    fridayMarketReminderRunning = true;
+    claimed = true;
+
+    // --------------------------------------------------------
+    // 1. SEND WEB BROWSER PUSH
+    // --------------------------------------------------------
+
+    let browserResult = null;
 
     try {
-      console.log(
-        "================================================"
+      browserResult = await broadcastBrowserPush(
+        title,
+        body,
+        "/"
       );
 
       console.log(
-        "🛍️ FRIDAY MARKET REMINDER STARTED"
-      );
-
-      console.log(
-        "Time:",
-        new Date().toISOString()
-      );
-
-      // Change this URL if your actual Friday Market
-      // screen uses a different route.
-      const notificationUrl = "/";
-
-      const result = await broadcastBrowserPush(
-        "🛍️ Nasara Friday Market Is Open!",
-        "It's Friday! Visit Nasara to discover products, connect with sellers, and explore Friday Market discounted deals.",
-        notificationUrl
-      );
-
-      console.log(
-        "🛍️ FRIDAY MARKET REMINDER RESULT:",
-        JSON.stringify(result)
-      );
-
-      console.log(
-        "================================================"
+        "🌐 FRIDAY MARKET BROWSER PUSH:",
+        JSON.stringify(browserResult)
       );
     } catch (error) {
       console.error(
-        "🔴 FRIDAY MARKET REMINDER ERROR:",
-        error
+        "🔴 Browser push failed:",
+        error.message || error
       );
-    } finally {
-      fridayMarketReminderRunning = false;
     }
+
+    // --------------------------------------------------------
+    // 2. GET REGISTERED NASARA USERS
+    // --------------------------------------------------------
+
+    const { data: users, error: usersError } =
+      await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .not("push_token", "is", null);
+
+    if (usersError) {
+      throw usersError;
+    }
+
+    console.log(
+      "📱 Registered Android push users:",
+      users?.length || 0
+    );
+
+    // --------------------------------------------------------
+    // 3. SEND ANDROID EXPO PUSH
+    // Reuse your existing notifyUser helper.
+    // --------------------------------------------------------
+
+    const mobileResults = await Promise.allSettled(
+      (users || []).map((user) =>
+        notifyUser(user.id, title, body)
+      )
+    );
+
+    const mobileSent = mobileResults.filter(
+      (result) => result.status === "fulfilled"
+    ).length;
+
+    const mobileFailed = mobileResults.filter(
+      (result) => result.status === "rejected"
+    ).length;
+
+    console.log("📱 FRIDAY MARKET ANDROID PUSH RESULT:");
+    console.log("Successful calls:", mobileSent);
+    console.log("Failed calls:", mobileFailed);
+
+    // --------------------------------------------------------
+    // 4. SAVE RESULT
+    // --------------------------------------------------------
+
+    const { error: updateError } = await supabaseAdmin
+      .from("friday_market_notifications")
+      .update({
+        status: "sent",
+        sent_at: new Date().toISOString(),
+      })
+      .eq("market_date", marketDate);
+
+    if (updateError) {
+      throw updateError;
+    }
+
+    console.log("🟢 FRIDAY MARKET REMINDER COMPLETED");
+    console.log("Browser result:", JSON.stringify(browserResult));
+    console.log("Android calls:", mobileSent);
+    console.log("Android failures:", mobileFailed);
+    console.log("================================================");
+
+  } catch (error) {
+    console.error(
+      "🔴 FRIDAY MARKET REMINDER ERROR:",
+      error
+    );
+
+    // Keep the claim so a restart cannot accidentally
+    // send duplicate notifications after partial delivery.
+    if (claimed) {
+      await supabaseAdmin
+        .from("friday_market_notifications")
+        .update({
+          status: "failed",
+        })
+        .eq("market_date", marketDate);
+    }
+
+  } finally {
+    fridayMarketReminderRunning = false;
+  }
+}
+
+// ------------------------------------------------------------
+// FRIDAY 9:00 AM GHANA SCHEDULE
+// ------------------------------------------------------------
+
+cron.schedule(
+  FRIDAY_MARKET_CRON,
+  async () => {
+    await sendFridayMarketReminder();
   },
   {
     timezone: "Africa/Accra",
@@ -7248,4 +7410,12 @@ app.listen(PORT, "0.0.0.0", () => {
   console.log(
     "🛍️ Friday Market reminder scheduled for Fridays at 9:00 AM Ghana time."
   );
+
+  // Catch up if Render starts after 9:00 AM on Friday.
+  sendFridayMarketReminder().catch((error) => {
+    console.error(
+      "🔴 Friday Market startup check failed:",
+      error
+    );
+  });
 });
