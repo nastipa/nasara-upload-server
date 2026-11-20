@@ -6,14 +6,19 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-// 🟣 =====================================================
-// 🟣 NASARA EXPO PUSH NOTIFICATION HELPER
-// 🟣 Android • Private Chat • Group Chat • Broadcast
-// 🟣 =====================================================
+// =====================================================
+// NASARA EXPO PUSH NOTIFICATION HELPER
+// Android • Chat • Groups • Admin Notifications
+// =====================================================
 
-async function notifyUser(userId, title, body) {
+async function notifyUser(
+  userId,
+  title,
+  body,
+  extraData = {}
+) {
   try {
-    // 🔵 1. GET RECIPIENT EXPO TOKEN
+    // 1. GET RECIPIENT EXPO TOKEN
 
     const { data, error } = await supabaseAdmin
       .from("profiles")
@@ -22,7 +27,7 @@ async function notifyUser(userId, title, body) {
       .maybeSingle();
 
     if (error) {
-      console.error("🔴 PUSH TOKEN LOOKUP ERROR:", error);
+      console.error("PUSH TOKEN LOOKUP ERROR:", error);
 
       return {
         success: false,
@@ -33,7 +38,7 @@ async function notifyUser(userId, title, body) {
     const pushToken = data?.push_token;
 
     if (!pushToken) {
-      console.log("⚠️ NO EXPO PUSH TOKEN:", userId);
+      console.log("NO EXPO PUSH TOKEN:", userId);
 
       return {
         success: false,
@@ -41,13 +46,13 @@ async function notifyUser(userId, title, body) {
       };
     }
 
-    // 🔵 2. VERIFY EXPO TOKEN FORMAT
+    // 2. VERIFY EXPO TOKEN FORMAT
 
     if (
       typeof pushToken !== "string" ||
       !/^Expo(nent)?PushToken\[[^\]]+\]$/.test(pushToken)
     ) {
-      console.error("🔴 INVALID EXPO PUSH TOKEN:", userId);
+      console.error("INVALID EXPO PUSH TOKEN:", userId);
 
       return {
         success: false,
@@ -55,7 +60,7 @@ async function notifyUser(userId, title, body) {
       };
     }
 
-    // 🟢 3. SEND EXPO NOTIFICATION
+    // 3. SEND EXPO NOTIFICATION
 
     const response = await fetch(
       "https://exp.host/--/api/v2/push/send",
@@ -73,17 +78,22 @@ async function notifyUser(userId, title, body) {
           body,
           data: {
             type: "chat",
+            ...(extraData &&
+            typeof extraData === "object" &&
+            !Array.isArray(extraData)
+              ? extraData
+              : {}),
             userId,
           },
         }),
       }
     );
 
-    // 🟡 4. READ EXPO RESPONSE
+    // 4. READ EXPO RESPONSE
 
     const result = await response.json();
 
-    console.log("📲 NASARA EXPO RESPONSE:", {
+    console.log("NASARA EXPO RESPONSE:", {
       userId,
       status: response.status,
       result,
@@ -101,7 +111,7 @@ async function notifyUser(userId, title, body) {
     const ticket = result?.data;
 
     if (ticket?.status === "error") {
-      console.error("🔴 EXPO PUSH REJECTED:", ticket);
+      console.error("EXPO PUSH REJECTED:", ticket);
 
       return {
         success: false,
@@ -110,15 +120,13 @@ async function notifyUser(userId, title, body) {
       };
     }
 
-    // 🟢 5. SUCCESS
-
     return {
       success: true,
       ticket,
     };
 
   } catch (err) {
-    console.error("🔴 NASARA PUSH ERROR:", err);
+    console.error("NASARA PUSH ERROR:", err);
 
     return {
       success: false,

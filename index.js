@@ -55,6 +55,673 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
+
+// ============================================================
+// 🔔 NASARA GENERAL ADMIN NOTIFICATION CENTRE
+// Android + Browser + Supabase In-App Notifications
+// ============================================================
+
+// ------------------------------------------------------------
+// 1. VERIFY NASARA ADMIN REQUEST
+// ------------------------------------------------------------
+
+async function authenticateNasaraAdminRequest(req, res) {
+  try {
+    const authorization =
+      req.headers.authorization || "";
+
+    if (!authorization.startsWith("Bearer ")) {
+      res.status(401).json({
+        success: false,
+        error: "Authorization token is required.",
+      });
+
+      return null;
+    }
+
+    const accessToken = authorization
+      .slice(7)
+      .trim();
+
+    if (!accessToken) {
+      res.status(401).json({
+        success: false,
+        error: "Invalid authorization token.",
+      });
+
+      return null;
+    }
+
+    const {
+      data: userData,
+      error: userError,
+    } = await supabaseAdmin.auth.getUser(accessToken);
+
+    if (userError || !userData?.user) {
+      res.status(401).json({
+        success: false,
+        error: "Invalid or expired login session.",
+      });
+
+      return null;
+    }
+
+    const user = userData.user;
+
+    const {
+      data: admin,
+      error: adminError,
+    } = await supabaseAdmin
+      .from("admins")
+      .select("user_id")
+      .eq("user_id", user.id)
+      .maybeSingle();
+
+    if (adminError) {
+      console.error(
+        "NASARA ADMIN CHECK ERROR:",
+        adminError
+      );
+
+      res.status(500).json({
+        success: false,
+        error: "Could not verify administrator access.",
+      });
+
+      return null;
+    }
+
+    if (!admin) {
+      res.status(403).json({
+        success: false,
+        error: "Nasara administrator access required.",
+      });
+
+      return null;
+    }
+
+    return user;
+
+  } catch (error) {
+    console.error(
+      "ADMIN AUTHENTICATION ERROR:",
+      error
+    );
+
+    res.status(500).json({
+      success: false,
+      error: "Administrator authentication failed.",
+    });
+
+    return null;
+  }
+}
+
+
+// ------------------------------------------------------------
+// 2. CREATE GENERAL ADMIN NOTIFICATION
+// ------------------------------------------------------------
+// This function can be called from other backend routes
+// when an important Nasara event occurs.
+// ------------------------------------------------------------
+
+async function createNasaraAdminNotification({
+  type,
+  title,
+  body,
+  ref_id = null,
+  data = {},
+  priority = "normal",
+  sender_id = null,
+}) {
+  if (!type || !title || !body) {
+    throw new Error(
+      "Notification type, title and body are required."
+    );
+  }
+
+  const allowedPriorities = [
+    "low",
+    "normal",
+    "high",
+    "urgent",
+  ];
+
+  const safePriority =
+    allowedPriorities.includes(priority)
+      ? priority
+      : "normal";
+
+  // Get only Nasara administrators.
+  // Coalition and utility administrators are excluded.
+
+  const {
+    data: admins,
+    error: adminsError,
+  } = await supabaseAdmin
+    .from("admins")
+    .select("user_id");
+
+  if (adminsError) {
+    throw new Error(
+      `Could not load Nasara administrators: ${adminsError.message}`
+    );
+  }
+
+  const adminIds = [
+    ...new Set(
+      (admins || [])
+        .map((admin) => admin.user_id)
+        .filter(Boolean)
+    ),
+  ];
+
+  if (adminIds.length === 0) {
+    console.log(
+      "No Nasara administrators found for notification."
+    );
+
+    return {
+      success: true,
+      recipients: 0,
+      saved: 0,
+      push_attempted: 0,
+    };
+  }
+
+  const notificationData = {
+    ...(data &&
+    typeof data === "object" &&
+    !Array.isArray(data)
+      ? data
+      : {}),
+    priority: safePriority,
+    url: "/admin/notifications",
+  };
+
+  // Create one in-app notification for each admin.
+
+  const rows = adminIds.map((adminId) => ({
+    user_id: adminId,
+    sender_id,
+    type,
+    title,
+    body,
+    message: body,
+    ref_id: ref_id ? String(ref_id) : null,
+    is_read: false,
+    data: notificationData,
+  }));
+
+  const {
+    data: savedNotifications,
+    error: saveError,
+  } = await supabaseAdmin
+    .from("notifications")
+    .insert(rows)
+    .select("id, user_id");
+
+  if (saveError) {
+    console.error(
+      "ADMIN NOTIFICATION SAVE ERROR:",
+      saveError
+    );
+
+    throw new Error(
+      `Could not save admin notifications: ${saveError.message}`
+    );
+  }
+
+  // Deliver Android and browser push independently.
+  // A push failure does not delete the saved in-app alert.
+
+  const pushResults = await Promise.allSettled(
+    (savedNotifications || []).map(
+      async (notification) => {
+        const pushData = {
+          type: "admin_notification",
+          notificationId: notification.id,
+          url: "/admin/notifications",
+          category: type,
+          priority: safePriority,
+        };
+
+        const results = await Promise.allSettled([
+          notifyUser(
+            notification.user_id,
+            title,
+            body,
+            pushData
+          ),
+
+          sendBrowserPushToUser(
+            notification.user_id,
+            title,
+            body,
+            "/admin/notifications",
+            {
+              tag: `nasara-admin-${notification.id}`,
+            }
+          ),
+        ]);
+
+        return results;
+      }
+    )
+  );
+
+  const pushAttempted = pushResults.length;
+
+  const pushFailed = pushResults.reduce(
+  (total, result) => {
+    if (result.status === "rejected") {
+      return total + 2;
+    }
+
+    const deliveries = result.value || [];
+
+    return (
+      total +
+      deliveries.filter(
+        (delivery) =>
+          delivery.status === "rejected" ||
+          delivery.value?.success === false
+      ).length
+    );
+  },
+  0
+);
+
+  return {
+    success: true,
+    recipients: adminIds.length,
+    saved: savedNotifications?.length || 0,
+    push_attempted: pushAttempted,
+    push_failed: pushFailed,
+  };
+}
+
+
+// ------------------------------------------------------------
+// 3. GET ADMIN NOTIFICATIONS
+// GET /admin/notifications
+// ------------------------------------------------------------
+
+app.get(
+  "/admin/notifications",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateNasaraAdminRequest(req, res);
+
+      if (!user) return;
+
+      const parsedLimit = Number(req.query.limit || 50);
+
+      const limit = Math.min(
+        Math.max(
+          Number.isFinite(parsedLimit)
+            ? Math.floor(parsedLimit)
+            : 50,
+          1
+        ),
+        100
+      );
+
+      const unreadOnly =
+        req.query.unread_only === "true";
+
+      let query = supabaseAdmin
+        .from("notifications")
+        .select(
+          "id, user_id, sender_id, type, title, body, message, ref_id, is_read, created_at, data"
+        )
+        .eq("user_id", user.id)
+        .order("created_at", {
+          ascending: false,
+        })
+        .limit(limit);
+
+      if (unreadOnly) {
+        query = query.eq("is_read", false);
+      }
+
+      const {
+        data: notifications,
+        error: notificationsError,
+      } = await query;
+
+      if (notificationsError) {
+        console.error(
+          "ADMIN NOTIFICATION LOAD ERROR:",
+          notificationsError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not load admin notifications.",
+        });
+      }
+
+      const {
+        count: unreadCount,
+        error: countError,
+      } = await supabaseAdmin
+        .from("notifications")
+        .select("id", {
+          count: "exact",
+          head: true,
+        })
+        .eq("user_id", user.id)
+        .eq("is_read", false);
+
+      if (countError) {
+        console.error(
+          "ADMIN UNREAD COUNT ERROR:",
+          countError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not load unread notification count.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        notifications: notifications || [],
+        unread_count: unreadCount || 0,
+      });
+
+    } catch (error) {
+      console.error(
+        "GET ADMIN NOTIFICATIONS ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not load admin notifications.",
+      });
+    }
+  }
+);
+
+
+// ------------------------------------------------------------
+// 4. GET ADMIN UNREAD COUNT
+// GET /admin/notifications/unread-count
+// ------------------------------------------------------------
+
+app.get(
+  "/admin/notifications/unread-count",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateNasaraAdminRequest(req, res);
+
+      if (!user) return;
+
+      const {
+        count,
+        error,
+      } = await supabaseAdmin
+        .from("notifications")
+        .select("id", {
+          count: "exact",
+          head: true,
+        })
+        .eq("user_id", user.id)
+        .eq("is_read", false);
+
+      if (error) {
+        console.error(
+          "ADMIN UNREAD COUNT ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not load unread count.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        unread_count: count || 0,
+      });
+
+    } catch (error) {
+      console.error(
+        "ADMIN UNREAD COUNT ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not load unread count.",
+      });
+    }
+  }
+);
+
+
+// ------------------------------------------------------------
+// 5. MARK ONE ADMIN NOTIFICATION AS READ
+// PATCH /admin/notifications/:id/read
+// ------------------------------------------------------------
+
+app.patch(
+  "/admin/notifications/:id/read",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateNasaraAdminRequest(req, res);
+
+      if (!user) return;
+
+      const notificationId =
+        String(req.params.id || "").trim();
+
+      if (!notificationId) {
+        return res.status(400).json({
+          success: false,
+          error: "Notification ID is required.",
+        });
+      }
+
+      const {
+        data: updatedNotification,
+        error,
+      } = await supabaseAdmin
+        .from("notifications")
+        .update({
+          is_read: true,
+        })
+        .eq("id", notificationId)
+        .eq("user_id", user.id)
+        .select("id, is_read")
+        .maybeSingle();
+
+      if (error) {
+        console.error(
+          "MARK ADMIN NOTIFICATION READ ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not update notification.",
+        });
+      }
+
+      if (!updatedNotification) {
+        return res.status(404).json({
+          success: false,
+          error: "Notification not found.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        notification: updatedNotification,
+      });
+
+    } catch (error) {
+      console.error(
+        "MARK ADMIN NOTIFICATION READ ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not update notification.",
+      });
+    }
+  }
+);
+
+
+// ------------------------------------------------------------
+// 6. MARK ALL ADMIN NOTIFICATIONS AS READ
+// PATCH /admin/notifications/read-all
+// ------------------------------------------------------------
+
+app.patch(
+  "/admin/notifications/read-all",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateNasaraAdminRequest(req, res);
+
+      if (!user) return;
+
+      const {
+        data: updatedNotifications,
+        error,
+      } = await supabaseAdmin
+        .from("notifications")
+        .update({
+          is_read: true,
+        })
+        .eq("user_id", user.id)
+        .eq("is_read", false)
+        .select("id");
+
+      if (error) {
+        console.error(
+          "MARK ALL ADMIN NOTIFICATIONS READ ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not mark notifications as read.",
+        });
+      }
+
+      return res.json({
+        success: true,
+        updated_count:
+          updatedNotifications?.length || 0,
+      });
+
+    } catch (error) {
+      console.error(
+        "MARK ALL ADMIN NOTIFICATIONS READ ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error: "Could not mark notifications as read.",
+      });
+    }
+  }
+);
+
+
+// ------------------------------------------------------------
+// 7. MANUALLY CREATE AN ADMIN ALERT
+// POST /admin/notifications
+// Only an authenticated Nasara admin can use this endpoint.
+// ------------------------------------------------------------
+
+app.post(
+  "/admin/notifications",
+  async (req, res) => {
+    try {
+      const user =
+        await authenticateNasaraAdminRequest(req, res);
+
+      if (!user) return;
+
+      const {
+        type,
+        title,
+        body,
+        ref_id,
+        data,
+        priority,
+      } = req.body || {};
+
+      if (
+        typeof type !== "string" ||
+        !type.trim() ||
+        typeof title !== "string" ||
+        !title.trim() ||
+        typeof body !== "string" ||
+        !body.trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "type, title and body are required.",
+        });
+      }
+
+      if (
+        type.length > 100 ||
+        title.length > 200 ||
+        body.length > 2000
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Notification content is too long.",
+        });
+      }
+
+      const result =
+        await createNasaraAdminNotification({
+          type: type.trim(),
+          title: title.trim(),
+          body: body.trim(),
+          ref_id,
+          data,
+          priority,
+          sender_id: user.id,
+        });
+
+      return res.status(201).json({
+        success: true,
+        message: "Admin notification created.",
+        result,
+      });
+
+    } catch (error) {
+      console.error(
+        "CREATE ADMIN NOTIFICATION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          "Could not create admin notification.",
+      });
+    }
+  }
+);
 /* ================= WEBSITE GENERATOR SUPABASE ADMIN ================= */
 
 const websiteGeneratorAdmin = createClient(
