@@ -63,12 +63,14 @@ async function sendBrowserPushToUser(
     );
   }
 
-  const {
-    icon = null,
-    tag = `nasara-notification-${Date.now()}`,
-    room_id = null,
-    image = null,
-  } = options;
+ const {
+  icon = null,
+  tag = `nasara-notification-${Date.now()}`,
+  room_id = null,
+  image = null,
+  type = null,
+  extraData = {},
+} = options;
 
   console.log("🟢 PUSH ICON URL:", icon);
 console.log("🟢 PUSH IMAGE URL:", image);
@@ -101,20 +103,28 @@ console.log("🟢 PUSH IMAGE URL:", image);
   for (const record of subscriptions) {
     try {
       await webpush.sendNotification(
-        record.subscription,
-        JSON.stringify({
-  title,
-  body,
-  ...(icon ? { icon } : {}),
-  ...(image ? { image } : {}),
-  tag,
-  url,
-  data: {
+  record.subscription,
+  JSON.stringify({
+    title,
+    body,
+    ...(icon ? { icon } : {}),
+    ...(image ? { image } : {}),
+    tag,
     url,
-    room_id,
-  },
-})
-      );
+    data: {
+      ...(
+        extraData &&
+        typeof extraData === "object" &&
+        !Array.isArray(extraData)
+          ? extraData
+          : {}
+      ),
+      url,
+      room_id,
+      ...(type ? { type } : {}),
+    },
+  })
+);
 
       sent++;
     } catch (error) {
