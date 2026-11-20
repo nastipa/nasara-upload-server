@@ -230,14 +230,15 @@ async function createNasaraAdminNotification({
   }
 
   const notificationData = {
-    ...(data &&
-    typeof data === "object" &&
-    !Array.isArray(data)
-      ? data
-      : {}),
-    priority: safePriority,
-    url: "/admin/notifications",
-  };
+  ...(data &&
+  typeof data === "object" &&
+  !Array.isArray(data)
+    ? data
+    : {}),
+  scope: "admin",
+  priority: safePriority,
+  url: "/admin/notifications",
+};
 
   // Create one in-app notification for each admin.
 
@@ -641,85 +642,482 @@ app.patch(
 );
 
 
+// ============================================================
+// NASARA GENERAL USER SUBMISSION -> ADMIN NOTIFICATION
+// POST /notifications/admin-submit
+//
+// Android Push + Browser Push + Supabase In-App Notifications
+//
+// Uses the existing createNasaraAdminNotification() function.
+// ============================================================
+
+
 // ------------------------------------------------------------
-// 7. MANUALLY CREATE AN ADMIN ALERT
-// POST /admin/notifications
-// Only an authenticated Nasara admin can use this endpoint.
+// 1. SUPPORTED NASARA ADMIN EVENTS
+// ------------------------------------------------------------
+
+const NASARA_ADMIN_EVENT_CONFIG = {
+
+  // ==========================================================
+  // ADVERTISEMENTS
+  // ==========================================================
+
+  ad_payment_request: {
+    table: "payments",
+    title: "New Advertisement Payment",
+    description: "Advertisement payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["ad"],
+  },
+
+  // ==========================================================
+  // BANNERS
+  // ==========================================================
+
+  banner_payment_request: {
+    table: "payments",
+    title: "New Banner Payment",
+    description: "Banner payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["banner"],
+  },
+
+  // ==========================================================
+  // PROMOTIONS
+  // ==========================================================
+
+  promotion_payment_request: {
+    table: "payments",
+    title: "New Promotion Payment",
+    description: "Promotion payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["promotion"],
+  },
+
+  // ==========================================================
+  // BOOSTS
+  // ==========================================================
+
+  boost_payment_request: {
+    table: "payments",
+    title: "New Boost Payment",
+    description: "Boost payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["boost"],
+  },
+
+  // ==========================================================
+  // BATTLES
+  // ==========================================================
+
+  battle_payment_request: {
+    table: "payments",
+    title: "New Battle Payment",
+    description: "Battle payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["battle"],
+  },
+
+  // ==========================================================
+  // FRIDAY MARKET
+  // ==========================================================
+
+  friday_market_payment: {
+    table: "payments",
+    title: "New Friday Market Payment",
+    description: "Friday Market payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["friday_market"],
+  },
+
+  // ==========================================================
+  // RIDER APPLICATIONS
+  // ==========================================================
+
+  rider_application: {
+    table: "rider_applications",
+    title: "New Rider Application",
+    description: "A new rider application needs review",
+    priority: "high",
+  },
+
+  // ==========================================================
+  // MENTOR APPLICATIONS
+  // ==========================================================
+
+  mentor_application: {
+    table: "mentor_applications",
+    title: "New Mentor Application",
+    description: "A new mentor application needs review",
+    priority: "high",
+  },
+
+  // ==========================================================
+  // MENTEE APPLICATIONS
+  // ==========================================================
+
+  mentee_application: {
+    table: "mentee_applications",
+    title: "New Mentee Application",
+    description: "A new mentee application needs review",
+    priority: "normal",
+  },
+
+  // ==========================================================
+  // AGRICULTURE - FARM BOOST
+  // ==========================================================
+
+  farm_boost_payment_request: {
+    table: "payments",
+    title: "New Farm Boost Payment",
+    description: "Farm boost payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["farm_boost"],
+  },
+
+  // ==========================================================
+  // AGRICULTURE - FARM FEATURED
+  // ==========================================================
+
+  farm_featured_payment_request: {
+    table: "payments",
+    title: "New Featured Farm Request",
+    description: "Featured farm payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["farm_featured"],
+  },
+
+  // ==========================================================
+  // AGRICULTURE - FARM ADVERTISEMENTS
+  // ==========================================================
+
+  farm_ad_payment_request: {
+    table: "payments",
+    title: "New Farm Advertisement",
+    description: "Farm advertisement payment submitted for verification",
+    priority: "high",
+    payment: true,
+    products: ["farm_ad"],
+  },
+
+  // ==========================================================
+  // AGRICULTURE - FARM VERIFICATION
+  // ==========================================================
+
+  farm_verification_request: {
+    table: "farm_verifications",
+    title: "New Farm Verification Request",
+    description: "A farm verification request needs review",
+    priority: "high",
+  },
+
+  // ==========================================================
+  // AGRICULTURE - FARM SUPPLIERS
+  // ==========================================================
+
+  farm_supplier_request: {
+    table: "farm_suppliers",
+    title: "New Farm Supplier Request",
+    description: "A farm supplier request needs review",
+    priority: "normal",
+  },
+
+};
+
+
+// ------------------------------------------------------------
+// 2. GENERAL ADMIN SUBMISSION NOTIFICATION ENDPOINT
 // ------------------------------------------------------------
 
 app.post(
-  "/admin/notifications",
+  "/notifications/admin-submit",
   async (req, res) => {
-    try {
-      const user =
-        await authenticateNasaraAdminRequest(req, res);
 
-      if (!user) return;
+    try {
+
+      // ------------------------------------------------------
+      // AUTHENTICATE USER
+      // ------------------------------------------------------
+
+      const authorization =
+        req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Login required.",
+        });
+      }
+
+      const accessToken =
+        authorization.slice(7).trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(
+        accessToken
+      );
+
+      if (
+        authError ||
+        !userData?.user
+      ) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired login session.",
+        });
+      }
+
+      const user = userData.user;
+
+
+      // ------------------------------------------------------
+      // READ SUBMISSION DETAILS
+      // ------------------------------------------------------
 
       const {
         type,
-        title,
-        body,
         ref_id,
-        data,
-        priority,
+        related_id = null,
       } = req.body || {};
 
       if (
         typeof type !== "string" ||
+        typeof ref_id !== "string" ||
         !type.trim() ||
-        typeof title !== "string" ||
-        !title.trim() ||
-        typeof body !== "string" ||
-        !body.trim()
+        !ref_id.trim()
       ) {
         return res.status(400).json({
           success: false,
-          error: "type, title and body are required.",
+          error: "Notification type and reference ID are required.",
         });
       }
 
+      const eventType = type.trim();
+      const referenceId = ref_id.trim();
+
       if (
-        type.length > 100 ||
-        title.length > 200 ||
-        body.length > 2000
+        referenceId.length > 100 ||
+        (
+          related_id !== null &&
+          (
+            typeof related_id !== "string" ||
+            related_id.length > 100
+          )
+        )
       ) {
         return res.status(400).json({
           success: false,
-          error: "Notification content is too long.",
+          error: "Invalid submission reference.",
         });
       }
+
+
+      // ------------------------------------------------------
+      // CHECK ALLOWED EVENT
+      // ------------------------------------------------------
+
+      const config =
+        NASARA_ADMIN_EVENT_CONFIG[eventType];
+
+      if (!config) {
+        return res.status(400).json({
+          success: false,
+          error: "Unsupported admin notification type.",
+        });
+      }
+
+
+      // ------------------------------------------------------
+      // VERIFY SUBMISSION BELONGS TO USER
+      // ------------------------------------------------------
+
+      const {
+        data: submission,
+        error: submissionError,
+      } = await supabaseAdmin
+        .from(config.table)
+        .select("*")
+        .eq("id", referenceId)
+        .eq("user_id", user.id)
+        .maybeSingle();
+
+      if (submissionError) {
+        console.error(
+          "ADMIN SUBMISSION VERIFICATION ERROR:",
+          submissionError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not verify submission.",
+        });
+      }
+
+      if (!submission) {
+        return res.status(404).json({
+          success: false,
+          error: "Submission not found or does not belong to you.",
+        });
+      }
+
+
+      // ------------------------------------------------------
+      // VERIFY PAYMENT SUBMISSIONS
+      // ------------------------------------------------------
+
+      if (config.payment) {
+
+        if (
+          submission.status !== "pending" ||
+          !submission.product_type
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Payment is not awaiting verification.",
+          });
+        }
+
+        const actualProduct =
+          String(
+            submission.product_type
+          ).toLowerCase();
+
+        if (
+          !config.products.includes(actualProduct)
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Payment type does not match this request.",
+          });
+        }
+      }
+
+
+      // ------------------------------------------------------
+      // PREVENT DUPLICATE NOTIFICATIONS
+      // ------------------------------------------------------
+
+      const {
+        data: existingNotification,
+        error: duplicateError,
+      } = await supabaseAdmin
+        .from("notifications")
+        .select("id")
+        .eq("ref_id", referenceId)
+        .eq("type", eventType)
+        .limit(1)
+        .maybeSingle();
+
+      if (duplicateError) {
+        console.error(
+          "ADMIN NOTIFICATION DUPLICATE CHECK ERROR:",
+          duplicateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not check existing notification.",
+        });
+      }
+
+      if (existingNotification) {
+        return res.json({
+          success: true,
+          duplicate: true,
+          message: "Administrators have already been notified.",
+        });
+      }
+
+
+      // ------------------------------------------------------
+      // CREATE CENTRAL ADMIN NOTIFICATION
+      // ------------------------------------------------------
+
+      const amount =
+        submission.amount !== undefined &&
+        submission.amount !== null
+          ? ` GH₵${submission.amount}`
+          : "";
 
       const result =
         await createNasaraAdminNotification({
-          type: type.trim(),
-          title: title.trim(),
-          body: body.trim(),
-          ref_id,
-          data,
-          priority,
+
+          type: eventType,
+
+          title: config.title,
+
+          body:
+            `${config.description}.` +
+            amount,
+
+          ref_id: referenceId,
+
           sender_id: user.id,
+
+          priority: config.priority,
+
+          data: {
+            scope: "admin",
+
+            url: "/admin/notifications",
+
+            event_type: eventType,
+
+            submission_id: referenceId,
+
+            related_id,
+
+            table: config.table,
+
+            submitted_by: user.id,
+          },
+
         });
 
+
+      // ------------------------------------------------------
+      // RETURN SUCCESS
+      // ------------------------------------------------------
+
       return res.status(201).json({
+
         success: true,
-        message: "Admin notification created.",
+
+        message: "Nasara administrators have been notified.",
+
         result,
+
       });
 
     } catch (error) {
+
       console.error(
-        "CREATE ADMIN NOTIFICATION ERROR:",
+        "NASARA ADMIN SUBMISSION NOTIFICATION ERROR:",
         error
       );
 
       return res.status(500).json({
+
         success: false,
+
         error:
           error.message ||
-          "Could not create admin notification.",
+          "Could not notify Nasara administrators.",
+
       });
+
     }
+
   }
 );
 /* ================= WEBSITE GENERATOR SUPABASE ADMIN ================= */
