@@ -659,7 +659,7 @@ app.patch(
 const NASARA_ADMIN_EVENT_CONFIG = {
 
   // ==========================================================
-  // ADVERTISEMENTS
+  // MARKETPLACE PAYMENTS
   // ==========================================================
 
   ad_payment_request: {
@@ -671,10 +671,6 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     products: ["ad"],
   },
 
-  // ==========================================================
-  // BANNERS
-  // ==========================================================
-
   banner_payment_request: {
     table: "payments",
     title: "New Banner Payment",
@@ -684,22 +680,14 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     products: ["banner"],
   },
 
-  // ==========================================================
-  // PROMOTIONS
-  // ==========================================================
-
   promotion_payment_request: {
     table: "payments",
     title: "New Promotion Payment",
     description: "Promotion payment submitted for verification",
     priority: "high",
     payment: true,
-    products: ["promotion"],
+    products: ["promote"],
   },
-
-  // ==========================================================
-  // BOOSTS
-  // ==========================================================
 
   boost_payment_request: {
     table: "payments",
@@ -710,10 +698,6 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     products: ["boost"],
   },
 
-  // ==========================================================
-  // BATTLES
-  // ==========================================================
-
   battle_payment_request: {
     table: "payments",
     title: "New Battle Payment",
@@ -722,10 +706,6 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     payment: true,
     products: ["battle"],
   },
-
-  // ==========================================================
-  // FRIDAY MARKET
-  // ==========================================================
 
   friday_market_payment: {
     table: "payments",
@@ -736,8 +716,9 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     products: ["friday_market"],
   },
 
+
   // ==========================================================
-  // RIDER APPLICATIONS
+  // DELIVERY - RIDER APPLICATIONS
   // ==========================================================
 
   rider_application: {
@@ -747,84 +728,85 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     priority: "high",
   },
 
+
   // ==========================================================
-  // MENTOR APPLICATIONS
+  // MENTORSHIP - MENTOR APPLICATIONS
   // ==========================================================
 
   mentor_application: {
-    table: "mentor_applications",
+    table: "mentors",
     title: "New Mentor Application",
-    description: "A new mentor application needs review",
+    description: "A new user has applied to become a Nasara mentor",
     priority: "high",
   },
 
+
   // ==========================================================
-  // MENTEE APPLICATIONS
+  // MENTORSHIP - MENTEE REQUESTS
   // ==========================================================
 
-  mentee_application: {
-    table: "mentee_applications",
-    title: "New Mentee Application",
-    description: "A new mentee application needs review",
+  mentee_request: {
+    table: "mentor_requests",
+    title: "New Mentee Request",
+    description: "A user has requested to be matched with a Nasara mentor",
     priority: "normal",
   },
+
 
   // ==========================================================
   // AGRICULTURE - FARM BOOST
   // ==========================================================
 
-  farm_boost_payment_request: {
-    table: "payments",
-    title: "New Farm Boost Payment",
-    description: "Farm boost payment submitted for verification",
+  farm_boost_request: {
+    table: "farm_boost_requests",
+    title: "New Farm Boost Request",
+    description: "A farm has submitted a boost request",
     priority: "high",
-    payment: true,
-    products: ["farm_boost"],
   },
 
+
   // ==========================================================
-  // AGRICULTURE - FARM FEATURED
+  // AGRICULTURE - FEATURED FARM
   // ==========================================================
 
-  farm_featured_payment_request: {
-    table: "payments",
+  farm_featured_request: {
+    table: "farm_featured_requests",
     title: "New Featured Farm Request",
-    description: "Featured farm payment submitted for verification",
+    description: "A farm has submitted a featured listing request",
     priority: "high",
-    payment: true,
-    products: ["farm_featured"],
   },
+
 
   // ==========================================================
   // AGRICULTURE - FARM ADVERTISEMENTS
   // ==========================================================
 
-  farm_ad_payment_request: {
-    table: "payments",
-    title: "New Farm Advertisement",
-    description: "Farm advertisement payment submitted for verification",
+  farm_ad_request: {
+    table: "farm_ad_requests",
+    title: "New Farm Advertisement Request",
+    description: "A farm has submitted an advertisement request",
     priority: "high",
-    payment: true,
-    products: ["farm_ad"],
   },
+
 
   // ==========================================================
   // AGRICULTURE - FARM VERIFICATION
   // ==========================================================
 
   farm_verification_request: {
-    table: "farm_verifications",
+    table: "farm_verification_requests",
     title: "New Farm Verification Request",
     description: "A farm verification request needs review",
     priority: "high",
   },
+
 
   // ==========================================================
   // AGRICULTURE - FARM SUPPLIERS
   // ==========================================================
 
   farm_supplier_request: {
-    table: "farm_suppliers",
+    table: "farm_supplier_requests",
     title: "New Farm Supplier Request",
     description: "A farm supplier request needs review",
     priority: "normal",
@@ -892,9 +874,12 @@ app.post(
 
       if (
         typeof type !== "string" ||
-        typeof ref_id !== "string" ||
         !type.trim() ||
-        !ref_id.trim()
+        (
+          typeof ref_id !== "string" &&
+          typeof ref_id !== "number"
+        ) ||
+        String(ref_id).trim() === ""
       ) {
         return res.status(400).json({
           success: false,
@@ -902,16 +887,25 @@ app.post(
         });
       }
 
-      const eventType = type.trim();
-      const referenceId = ref_id.trim();
+      const eventType =
+        type.trim();
+
+      const referenceId =
+        String(ref_id).trim();
+
+      const relatedId =
+        related_id === null ||
+        related_id === undefined
+          ? null
+          : String(related_id).trim();
 
       if (
         referenceId.length > 100 ||
         (
-          related_id !== null &&
+          relatedId !== null &&
           (
-            typeof related_id !== "string" ||
-            related_id.length > 100
+            !relatedId ||
+            relatedId.length > 100
           )
         )
       ) {
@@ -927,7 +921,12 @@ app.post(
       // ------------------------------------------------------
 
       const config =
-        NASARA_ADMIN_EVENT_CONFIG[eventType];
+        Object.prototype.hasOwnProperty.call(
+          NASARA_ADMIN_EVENT_CONFIG,
+          eventType
+        )
+          ? NASARA_ADMIN_EVENT_CONFIG[eventType]
+          : null;
 
       if (!config) {
         return res.status(400).json({
@@ -938,7 +937,7 @@ app.post(
 
 
       // ------------------------------------------------------
-      // VERIFY SUBMISSION BELONGS TO USER
+      // VERIFY SUBMISSION BELONGS TO AUTHENTICATED USER
       // ------------------------------------------------------
 
       const {
@@ -978,7 +977,7 @@ app.post(
       if (config.payment) {
 
         if (
-          submission.status !== "pending" ||
+          String(submission.status).toLowerCase() !== "pending" ||
           !submission.product_type
         ) {
           return res.status(400).json({
@@ -990,7 +989,7 @@ app.post(
         const actualProduct =
           String(
             submission.product_type
-          ).toLowerCase();
+          ).toLowerCase().trim();
 
         if (
           !config.products.includes(actualProduct)
@@ -1040,7 +1039,7 @@ app.post(
 
 
       // ------------------------------------------------------
-      // CREATE CENTRAL ADMIN NOTIFICATION
+      // PREPARE NOTIFICATION
       // ------------------------------------------------------
 
       const amount =
@@ -1048,6 +1047,11 @@ app.post(
         submission.amount !== null
           ? ` GH₵${submission.amount}`
           : "";
+
+
+      // ------------------------------------------------------
+      // CREATE CENTRAL ADMIN NOTIFICATION
+      // ------------------------------------------------------
 
       const result =
         await createNasaraAdminNotification({
@@ -1067,6 +1071,7 @@ app.post(
           priority: config.priority,
 
           data: {
+
             scope: "admin",
 
             url: "/admin/notifications",
@@ -1075,11 +1080,12 @@ app.post(
 
             submission_id: referenceId,
 
-            related_id,
+            related_id: relatedId,
 
             table: config.table,
 
             submitted_by: user.id,
+
           },
 
         });
