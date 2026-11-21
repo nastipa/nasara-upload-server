@@ -9007,8 +9007,11 @@ async function runNasaraDailyEngagementCampaign() {
 
   nasaraDailyEngagementRunning = true;
 
+  let campaignDate = null;
+
   try {
     const ghanaTime = getNasaraGhanaDateTime();
+    campaignDate = ghanaTime.date;
 
     const { data: settings, error: settingsError } =
       await supabaseAdmin
@@ -9027,10 +9030,8 @@ async function runNasaraDailyEngagementCampaign() {
       Number(settings.send_hour) * 60 +
       Number(settings.send_minute);
 
-    // Allow catch-up when Render starts after the scheduled time.
     if (currentMinutes < scheduledMinutes) return;
 
-    // Get today's enabled campaign.
     const { data: campaign, error: campaignError } =
       await supabaseAdmin
         .from(NASARA_ENGAGEMENT_CAMPAIGNS)
@@ -9049,45 +9050,80 @@ async function runNasaraDailyEngagementCampaign() {
       return;
     }
 
-    // Claim today's campaign once.
-    const { error: claimError } = await supabaseAdmin
-      .from(NASARA_ENGAGEMENT_HISTORY)
-      .insert({
-        notification_date: ghanaTime.date,
-        feature_key: campaign.feature_key,
-        title: campaign.title,
-        body: campaign.body,
-        status: "processing",
-        target_count: 0,
-        sent_count: 0,
-        failed_count: 0,
-        started_at: new Date().toISOString(),
-      });
+    // --------------------------------------------------------
+    // 1. CHECK EXISTING DAILY HISTORY
+    // --------------------------------------------------------
 
-    if (claimError) {
-      if (claimError.code === "23505") {
-        console.log(
-          "Nasara engagement already claimed for",
-          ghanaTime.date
-        );
-        return;
-      }
+    const { data: existing, error: historyError } =
+      await supabaseAdmin
+        .from(NASARA_ENGAGEMENT_HISTORY)
+        .select("*")
+        .eq("notification_date", campaignDate)
+        .maybeSingle();
 
-      throw claimError;
+    if (historyError) throw historyError;
+
+    if (existing?.status === "sent") {
+      console.log(
+        "Nasara engagement already completed for",
+        campaignDate
+      );
+      return;
+    }
+
+    if (existing?.status === "processing") {
+      console.log(
+        "Nasara engagement is already processing for",
+        campaignDate
+      );
+      return;
+    }
+
+    // --------------------------------------------------------
+    // 2. CREATE OR REOPEN TODAY'S CLAIM
+    // --------------------------------------------------------
+
+    if (existing) {
+      const { error: reopenError } = await supabaseAdmin
+        .from(NASARA_ENGAGEMENT_HISTORY)
+        .update({
+          status: "processing",
+          feature_key: campaign.feature_key,
+          title: campaign.title,
+          body: campaign.body,
+          started_at: new Date().toISOString(),
+          completed_at: null,
+        })
+        .eq("notification_date", campaignDate);
+
+      if (reopenError) throw reopenError;
+    } else {
+      const { error: claimError } = await supabaseAdmin
+        .from(NASARA_ENGAGEMENT_HISTORY)
+        .insert({
+          notification_date: campaignDate,
+          feature_key: campaign.feature_key,
+          title: campaign.title,
+          body: campaign.body,
+          status: "processing",
+          target_count: 0,
+          sent_count: 0,
+          failed_count: 0,
+          started_at: new Date().toISOString(),
+        });
+
+      if (claimError) throw claimError;
     }
 
     console.log("NASARA DAILY ENGAGEMENT STARTED:", {
-      date: ghanaTime.date,
+      date: campaignDate,
       feature: campaign.feature_key,
-      scheduledTime:
-        `${String(settings.send_hour).padStart(2, "0")}:` +
-        `${String(settings.send_minute).padStart(2, "0")}`,
-      actualTime:
-        `${String(ghanaTime.hour).padStart(2, "0")}:` +
-        `${String(ghanaTime.minute).padStart(2, "0")}`,
     });
 
-    // Get eligible users for native notifications.
+    // --------------------------------------------------------
+    // 3. GET ELIGIBLE NATIVE USERS
+    // --------------------------------------------------------
+
     const { data: users, error: usersError } =
       await supabaseAdmin
         .from("profiles")
@@ -9100,8 +9136,7 @@ async function runNasaraDailyEngagementCampaign() {
     const targetUsers = users || [];
 
     // --------------------------------------------------------
-    // 1. BROWSER PUSH — SAME METHOD AS THE WORKING TEST
-    // One broadcast to registered browser subscriptions.
+    // 4. BROWSER PUSH — ONE BROADCAST
     // --------------------------------------------------------
 
     let browserResult = null;
@@ -9113,21 +9148,25 @@ async function runNasaraDailyEngagementCampaign() {
         campaign.body,
         "/"
       );
+
+      console.log(
+        "NASARA ENGAGEMENT BROWSER RESULT:",
+        browserResult
+      );
     } catch (error) {
       browserError = error?.message || String(error);
 
       console.error(
-        "NASARA ENGAGEMENT BROWSER BROADCAST ERROR:",
+        "NASARA ENGAGEMENT BROWSER ERROR:",
         browserError
       );
     }
 
     const browserSent = Number(browserResult?.sent || 0);
     const browserFailed = Number(browserResult?.failed || 0);
-    const browserAccepted = browserSent > 0;
 
     // --------------------------------------------------------
-    // 2. NATIVE PUSH — SEND TO EACH ELIGIBLE USER
+    // 5. NATIVE PUSH — INDIVIDUAL USERS
     // --------------------------------------------------------
 
     let nativeSent = 0;
@@ -9155,7 +9194,7 @@ async function runNasaraDailyEngagementCampaign() {
       );
 
       for (const result of results) {
-        if (result.success) {
+        if (result?.success === true) {
           nativeSent += 1;
         } else {
           nativeFailed += 1;
@@ -9174,32 +9213,29 @@ async function runNasaraDailyEngagementCampaign() {
     }
 
     // --------------------------------------------------------
-    // 3. DETERMINE OVERALL CAMPAIGN STATUS
+    // 6. DETERMINE STATUS
     // --------------------------------------------------------
+
+    const browserAccepted = browserSent > 0;
 
     const anyAccepted =
       nativeSent > 0 || browserAccepted;
 
-    const allChannelsWithoutReportedFailures =
-      nativeFailed === 0 &&
-      browserFailed === 0 &&
-      !browserError;
+    const hasFailures =
+      nativeFailed > 0 ||
+      browserFailed > 0 ||
+      !!browserError;
 
     let status = "failed";
 
-    if (
-      anyAccepted &&
-      allChannelsWithoutReportedFailures
-    ) {
+    if (anyAccepted && !hasFailures) {
       status = "sent";
     } else if (anyAccepted) {
       status = "partial";
     }
 
     // --------------------------------------------------------
-    // 4. SAVE HISTORY
-    // sent_count and failed_count represent native user results.
-    // Browser subscription counts are reported separately below.
+    // 7. SAVE HISTORY
     // --------------------------------------------------------
 
     const { error: updateError } = await supabaseAdmin
@@ -9211,26 +9247,23 @@ async function runNasaraDailyEngagementCampaign() {
         failed_count: nativeFailed,
         completed_at: new Date().toISOString(),
       })
-      .eq("notification_date", ghanaTime.date);
+      .eq("notification_date", campaignDate);
 
     if (updateError) throw updateError;
 
     console.log("NASARA DAILY ENGAGEMENT COMPLETED:", {
-      date: ghanaTime.date,
+      date: campaignDate,
       feature: campaign.feature_key,
-
       native: {
         target: targetUsers.length,
         accepted: nativeSent,
         failed: nativeFailed,
       },
-
       browser: {
         accepted: browserSent,
         failed: browserFailed,
         error: browserError,
       },
-
       status,
     });
 
@@ -9239,6 +9272,25 @@ async function runNasaraDailyEngagementCampaign() {
       "Nasara daily engagement scheduler error:",
       error
     );
+
+    // Mark an interrupted campaign as failed so it can be retried.
+    if (campaignDate) {
+      try {
+        await supabaseAdmin
+          .from(NASARA_ENGAGEMENT_HISTORY)
+          .update({
+            status: "failed",
+            completed_at: new Date().toISOString(),
+          })
+          .eq("notification_date", campaignDate)
+          .eq("status", "processing");
+      } catch (historyError) {
+        console.error(
+          "Could not update engagement failure history:",
+          historyError
+        );
+      }
+    }
   } finally {
     nasaraDailyEngagementRunning = false;
   }
