@@ -1034,6 +1034,23 @@ if (config.registration) {
   }
 }
 
+// ------------------------------------------------------
+      // VERIFY DELIVERY PAYMENT SUBMISSIONS
+      // ------------------------------------------------------
+
+      if (config.deliveryRequest) {
+        if (
+          submission.payment_status !== "pending" ||
+          submission.status !== "pending_payment" ||
+          Number(submission.amount) <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Delivery request is not awaiting payment verification.",
+          });
+        }
+      }
+
       // ------------------------------------------------------
       // PREVENT DUPLICATE NOTIFICATIONS
       // ------------------------------------------------------
