@@ -8798,29 +8798,14 @@ app.get("/admin/engagement/history", async (req, res) => {
     });
   }
 });
-
 // ------------------------------------------------------------
-// Send one reminder to one user
-// Send to native AND browser independently.
-// Neither channel depends on the other failing.
+// Send one native reminder to one user
+// Browser push is handled once per campaign using broadcast.
 // ------------------------------------------------------------
 
-async function sendNasaraEngagementReminder(
-  userId,
-  campaign
-) {
-  let nativeResult = null;
-  let browserResult = null;
-
-  let nativeError = null;
-  let browserError = null;
-
-  // ----------------------------------------------------------
-  // 1. ATTEMPT NATIVE PUSH
-  // ----------------------------------------------------------
-
+async function sendNasaraEngagementReminder(userId, campaign) {
   try {
-    nativeResult = await notifyUser(
+    const result = await notifyUser(
       userId,
       campaign.title,
       campaign.body,
@@ -8830,110 +8815,35 @@ async function sendNasaraEngagementReminder(
         url: "/",
       }
     );
-  } catch (error) {
-    nativeError = error.message || String(error);
 
+    const accepted = result?.success === true;
+
+    if (!accepted) {
+      console.error(
+        "Engagement native notification not accepted:",
+        userId,
+        result
+      );
+    }
+
+    return {
+      success: accepted,
+      userId,
+      result,
+    };
+  } catch (error) {
     console.error(
       "Engagement native notification failed:",
       userId,
-      nativeError
+      error?.message || String(error)
     );
-  }
 
-  // ----------------------------------------------------------
-  // 2. ATTEMPT BROWSER PUSH REGARDLESS OF NATIVE RESULT
-  // ----------------------------------------------------------
-
-  try {
-    browserResult = await sendBrowserPushToUser(
+    return {
+      success: false,
       userId,
-      campaign.title,
-      campaign.body,
-      "/",
-      {
-        type: "daily_engagement",
-        tag: `nasara-daily-${campaign.feature_key}`,
-        extraData: {
-          type: "daily_engagement",
-          feature_key: campaign.feature_key,
-        },
-      }
-    );
-  } catch (error) {
-    browserError = error.message || String(error);
-
-    console.error(
-      "Engagement browser notification failed:",
-      userId,
-      browserError
-    );
-  }
-
-  // ----------------------------------------------------------
-  // 3. DETERMINE DELIVERY RESULTS INDEPENDENTLY
-  // ----------------------------------------------------------
-
-  const nativeAccepted =
-    nativeResult?.success === true;
-
-  const browserSent =
-    Number(browserResult?.sent || 0);
-
-  const browserAccepted =
-    browserSent > 0;
-
-  console.log("Nasara engagement delivery:", {
-    userId,
-    nativeAccepted,
-    browserSent,
-    nativeError,
-    browserError,
-  });
-
-  // ----------------------------------------------------------
-  // 4. REPORT SUCCESS IF AT LEAST ONE CHANNEL ACCEPTED
-  // ----------------------------------------------------------
-
-  if (nativeAccepted && browserAccepted) {
-    return {
-      success: true,
-      channel: "native_and_browser",
-      native: true,
-      browser: true,
-      browserSent,
+      error: error?.message || String(error),
     };
   }
-
-  if (nativeAccepted) {
-    return {
-      success: true,
-      channel: "native",
-      native: true,
-      browser: false,
-      browserSent,
-    };
-  }
-
-  if (browserAccepted) {
-    return {
-      success: true,
-      channel: "browser",
-      native: false,
-      browser: true,
-      browserSent,
-    };
-  }
-
-  return {
-    success: false,
-    channel: "none",
-    reason:
-      "Neither native nor browser notification delivery was accepted.",
-    nativeError,
-    browserError,
-    nativeResult,
-    browserResult,
-  };
 }
 // ------------------------------------------------------------
 // Admin API: Send a test reminder
@@ -9082,9 +8992,9 @@ app.post("/admin/engagement/test", async (req, res) => {
 });
 // ------------------------------------------------------------
 // Daily scheduler
-// Runs every minute and checks the configured Ghana time.
-// Also supports startup catch-up if Render starts late.
-// A date can only be claimed once using notification_date.
+// Native: individual users
+// Browser: one broadcast to all registered subscriptions
+// Ghana timezone: Africa/Accra
 // ------------------------------------------------------------
 
 let nasaraDailyEngagementRunning = false;
@@ -9097,9 +9007,9 @@ async function runNasaraDailyEngagementCampaign() {
 
   nasaraDailyEngagementRunning = true;
 
-  const ghanaTime = getNasaraGhanaDateTime();
-
   try {
+    const ghanaTime = getNasaraGhanaDateTime();
+
     const { data: settings, error: settingsError } =
       await supabaseAdmin
         .from(NASARA_ENGAGEMENT_SETTINGS)
@@ -9110,11 +9020,6 @@ async function runNasaraDailyEngagementCampaign() {
     if (settingsError) throw settingsError;
     if (!settings || settings.enabled !== true) return;
 
-    // --------------------------------------------------------
-    // SEND AT OR AFTER THE SAVED TIME.
-    // This allows a late Render startup to catch up.
-    // --------------------------------------------------------
-
     const currentMinutes =
       ghanaTime.hour * 60 + ghanaTime.minute;
 
@@ -9122,14 +9027,10 @@ async function runNasaraDailyEngagementCampaign() {
       Number(settings.send_hour) * 60 +
       Number(settings.send_minute);
 
-    if (currentMinutes < scheduledMinutes) {
-      return;
-    }
+    // Allow catch-up when Render starts after the scheduled time.
+    if (currentMinutes < scheduledMinutes) return;
 
-    // --------------------------------------------------------
-    // GET TODAY'S ACTIVE CAMPAIGN
-    // --------------------------------------------------------
-
+    // Get today's enabled campaign.
     const { data: campaign, error: campaignError } =
       await supabaseAdmin
         .from(NASARA_ENGAGEMENT_CAMPAIGNS)
@@ -9148,11 +9049,7 @@ async function runNasaraDailyEngagementCampaign() {
       return;
     }
 
-    // --------------------------------------------------------
-    // CLAIM TODAY'S NOTIFICATION.
-    // The unique notification_date prevents duplicate sends.
-    // --------------------------------------------------------
-
+    // Claim today's campaign once.
     const { error: claimError } = await supabaseAdmin
       .from(NASARA_ENGAGEMENT_HISTORY)
       .insert({
@@ -9181,19 +9078,16 @@ async function runNasaraDailyEngagementCampaign() {
 
     console.log("NASARA DAILY ENGAGEMENT STARTED:", {
       date: ghanaTime.date,
+      feature: campaign.feature_key,
       scheduledTime:
         `${String(settings.send_hour).padStart(2, "0")}:` +
         `${String(settings.send_minute).padStart(2, "0")}`,
       actualTime:
         `${String(ghanaTime.hour).padStart(2, "0")}:` +
         `${String(ghanaTime.minute).padStart(2, "0")}`,
-      feature: campaign.feature_key,
     });
 
-    // --------------------------------------------------------
-    // GET ELIGIBLE USERS
-    // --------------------------------------------------------
-
+    // Get eligible users for native notifications.
     const { data: users, error: usersError } =
       await supabaseAdmin
         .from("profiles")
@@ -9205,13 +9099,39 @@ async function runNasaraDailyEngagementCampaign() {
 
     const targetUsers = users || [];
 
-    let sentCount = 0;
-    let failedCount = 0;
+    // --------------------------------------------------------
+    // 1. BROWSER PUSH — SAME METHOD AS THE WORKING TEST
+    // One broadcast to registered browser subscriptions.
+    // --------------------------------------------------------
+
+    let browserResult = null;
+    let browserError = null;
+
+    try {
+      browserResult = await broadcastBrowserPush(
+        campaign.title,
+        campaign.body,
+        "/"
+      );
+    } catch (error) {
+      browserError = error?.message || String(error);
+
+      console.error(
+        "NASARA ENGAGEMENT BROWSER BROADCAST ERROR:",
+        browserError
+      );
+    }
+
+    const browserSent = Number(browserResult?.sent || 0);
+    const browserFailed = Number(browserResult?.failed || 0);
+    const browserAccepted = browserSent > 0;
 
     // --------------------------------------------------------
-    // SEND NATIVE + BROWSER NOTIFICATIONS
-    // Keep the existing working delivery function unchanged.
+    // 2. NATIVE PUSH — SEND TO EACH ELIGIBLE USER
     // --------------------------------------------------------
+
+    let nativeSent = 0;
+    let nativeFailed = 0;
 
     const batchSize = 25;
 
@@ -9236,32 +9156,59 @@ async function runNasaraDailyEngagementCampaign() {
 
       for (const result of results) {
         if (result.success) {
-          sentCount += 1;
+          nativeSent += 1;
         } else {
-          failedCount += 1;
+          nativeFailed += 1;
         }
       }
+
+      console.log("NASARA ENGAGEMENT NATIVE BATCH:", {
+        processed: Math.min(
+          start + batch.length,
+          targetUsers.length
+        ),
+        total: targetUsers.length,
+        accepted: nativeSent,
+        failed: nativeFailed,
+      });
     }
 
     // --------------------------------------------------------
-    // SAVE FINAL RESULT
+    // 3. DETERMINE OVERALL CAMPAIGN STATUS
     // --------------------------------------------------------
 
-    let status = "sent";
+    const anyAccepted =
+      nativeSent > 0 || browserAccepted;
 
-    if (failedCount > 0 && sentCount > 0) {
+    const allChannelsWithoutReportedFailures =
+      nativeFailed === 0 &&
+      browserFailed === 0 &&
+      !browserError;
+
+    let status = "failed";
+
+    if (
+      anyAccepted &&
+      allChannelsWithoutReportedFailures
+    ) {
+      status = "sent";
+    } else if (anyAccepted) {
       status = "partial";
-    } else if (failedCount > 0 && sentCount === 0) {
-      status = "failed";
     }
+
+    // --------------------------------------------------------
+    // 4. SAVE HISTORY
+    // sent_count and failed_count represent native user results.
+    // Browser subscription counts are reported separately below.
+    // --------------------------------------------------------
 
     const { error: updateError } = await supabaseAdmin
       .from(NASARA_ENGAGEMENT_HISTORY)
       .update({
         status,
         target_count: targetUsers.length,
-        sent_count: sentCount,
-        failed_count: failedCount,
+        sent_count: nativeSent,
+        failed_count: nativeFailed,
         completed_at: new Date().toISOString(),
       })
       .eq("notification_date", ghanaTime.date);
@@ -9271,9 +9218,19 @@ async function runNasaraDailyEngagementCampaign() {
     console.log("NASARA DAILY ENGAGEMENT COMPLETED:", {
       date: ghanaTime.date,
       feature: campaign.feature_key,
-      target: targetUsers.length,
-      sent: sentCount,
-      failed: failedCount,
+
+      native: {
+        target: targetUsers.length,
+        accepted: nativeSent,
+        failed: nativeFailed,
+      },
+
+      browser: {
+        accepted: browserSent,
+        failed: browserFailed,
+        error: browserError,
+      },
+
       status,
     });
 
@@ -9286,7 +9243,6 @@ async function runNasaraDailyEngagementCampaign() {
     nasaraDailyEngagementRunning = false;
   }
 }
-
 // ------------------------------------------------------------
 // Register scheduler
 // node-cron is already used by the existing backend.
@@ -9324,4 +9280,11 @@ app.listen(PORT, "0.0.0.0", () => {
       error
     );
   });
+  // Catch up Engagement Manager if Render starts late.
+runNasaraDailyEngagementCampaign().catch((error) => {
+  console.error(
+    "Nasara Engagement startup check failed:",
+    error
+  );
+});
 });
