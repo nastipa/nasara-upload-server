@@ -8538,6 +8538,437 @@ cron.schedule(
 );
 
 // ============================================================
+// 🔔 NASARA DAILY ENGAGEMENT REMINDERS
+// Daily at 8:30 AM Ghana time
+// Native push first, browser push as fallback
+// Respects profiles.notifications_enabled
+// ============================================================
+
+const DAILY_ENGAGEMENT_TABLE =
+  "nasara_daily_engagement_notifications";
+
+let dailyEngagementReminderRunning = false;
+
+const NASARA_DAILY_CAMPAIGNS = {
+  Monday: {
+    featureKey: "marketplace",
+    title: "What's happening on Nasara today?",
+    body:
+      "Browse products, discover businesses, post something for sale, " +
+      "or connect with buyers and sellers. Open Nasara and get active today."
+  },
+
+  Tuesday: {
+    featureKey: "chat_contacts_groups",
+    title: "Connect with people on Nasara",
+    body:
+      "Check your chats, message buyers and sellers, save contacts, " +
+      "create groups, and stay connected with people on Nasara."
+  },
+
+  Wednesday: {
+    featureKey: "business_promotion",
+    title: "Give your business more visibility",
+    body:
+      "Promote your products and services with Nasara advertisements, " +
+      "banners, boosts, and business websites. Reach more customers."
+  },
+
+  Thursday: {
+    featureKey: "videos_live",
+    title: "Share something on Nasara today",
+    body:
+      "Create and watch Reels, share videos, follow people, and go live. " +
+      "Let more people discover what you have to offer."
+  },
+
+  Friday: {
+    featureKey: "deals_auctions_friday_market",
+    title: "Discover deals on Nasara",
+    body:
+      "Explore Special Deals, auctions, products, and Friday Market. " +
+      "Find opportunities as a buyer or seller."
+  },
+
+  Saturday: {
+    featureKey: "restaurants_delivery_rides",
+    title: "Explore services on Nasara",
+    body:
+      "Discover restaurants, explore food services, place orders, " +
+      "and check delivery and ride services on Nasara."
+  },
+
+  Sunday: {
+    featureKey: "farms_mentorship_health",
+    title: "There is more to explore on Nasara",
+    body:
+      "Discover farm products, connect with mentors, and explore " +
+      "health, hospital, and other business services on Nasara."
+  }
+};
+
+// ------------------------------------------------------------
+// GHANA DATE AND TIME
+// ------------------------------------------------------------
+
+function getNasaraGhanaDateParts() {
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Africa/Accra",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  }).formatToParts(new Date());
+
+  const values = {};
+
+  for (const part of parts) {
+    if (part.type !== "literal") {
+      values[part.type] = part.value;
+    }
+  }
+
+  return {
+    date: `${values.year}-${values.month}-${values.day}`,
+    hour: Number(values.hour),
+    minute: Number(values.minute)
+  };
+}
+
+function getNasaraGhanaWeekday() {
+  return new Intl.DateTimeFormat("en-US", {
+    timeZone: "Africa/Accra",
+    weekday: "long"
+  }).format(new Date());
+}
+
+// ------------------------------------------------------------
+// SEND TO ONE USER
+// Native push first; browser fallback.
+// ------------------------------------------------------------
+
+async function sendNasaraDailyReminderToUser(userId, campaign) {
+  // Try existing Expo notification helper.
+  try {
+    const nativeResult = await notifyUser(
+      userId,
+      campaign.title,
+      campaign.body,
+      {
+        type: "daily_engagement",
+        feature_key: campaign.featureKey,
+        url: "/"
+      }
+    );
+
+    if (nativeResult?.success === true) {
+      return {
+        success: true,
+        channel: "native"
+      };
+    }
+
+    console.log(
+      `Native push unavailable for ${userId}; trying browser push.`,
+      nativeResult?.reason || ""
+    );
+  } catch (error) {
+    console.error(
+      `Native push error for ${userId}:`,
+      error.message
+    );
+  }
+
+  // Fall back to the user's existing browser subscriptions.
+  try {
+    const browserResult = await sendBrowserPushToUser(
+      userId,
+      campaign.title,
+      campaign.body,
+      "/",
+      {
+        type: "daily_engagement",
+        tag: `nasara-daily-${campaign.featureKey}`,
+        extraData: {
+          type: "daily_engagement",
+          feature_key: campaign.featureKey
+        }
+      }
+    );
+
+    if (
+      browserResult &&
+      Number(browserResult.sent) > 0
+    ) {
+      return {
+        success: true,
+        channel: "browser",
+        sent: browserResult.sent
+      };
+    }
+
+    return {
+      success: false,
+      reason: "no_successful_push_channel"
+    };
+  } catch (error) {
+    console.error(
+      `Browser push error for ${userId}:`,
+      error.message
+    );
+
+    return {
+      success: false,
+      reason: "browser_push_error"
+    };
+  }
+}
+
+// ------------------------------------------------------------
+// DAILY CAMPAIGN
+// ------------------------------------------------------------
+
+async function sendDailyEngagementReminder() {
+  if (dailyEngagementReminderRunning) {
+    console.log(
+      "Daily engagement reminder is already running."
+    );
+    return;
+  }
+
+  const ghanaTime = getNasaraGhanaDateParts();
+
+  const currentMinutes =
+    ghanaTime.hour * 60 + ghanaTime.minute;
+
+  if (currentMinutes < 8 * 60 + 30) {
+    console.log(
+      "Daily engagement reminder is not due yet."
+    );
+    return;
+  }
+
+  const weekday = getNasaraGhanaWeekday();
+  const campaign = NASARA_DAILY_CAMPAIGNS[weekday];
+
+  if (!campaign) {
+    console.error(
+      "No daily campaign configured for:",
+      weekday
+    );
+    return;
+  }
+
+  dailyEngagementReminderRunning = true;
+
+  let campaignClaimed = false;
+
+  try {
+    console.log(
+      "Starting Nasara daily campaign:",
+      campaign.featureKey,
+      ghanaTime.date
+    );
+
+    // Claim the campaign for this Ghana-local date.
+    // The primary key prevents duplicate daily campaigns.
+    const { error: claimError } = await supabase
+      .from(DAILY_ENGAGEMENT_TABLE)
+      .insert({
+        notification_date: ghanaTime.date,
+        feature_key: campaign.featureKey,
+        title: campaign.title,
+        body: campaign.body,
+        status: "processing",
+        started_at: new Date().toISOString()
+      });
+
+    if (claimError) {
+      if (claimError.code === "23505") {
+        console.log(
+          "Today's daily campaign has already been claimed."
+        );
+        return;
+      }
+
+      throw claimError;
+    }
+
+    campaignClaimed = true;
+
+    // Only users who have enabled notifications.
+    const { data: recipients, error: recipientsError } =
+      await supabase
+        .from("profiles")
+        .select("id")
+        .eq("notifications_enabled", true)
+        .eq("is_banned", false);
+
+    if (recipientsError) {
+      throw recipientsError;
+    }
+
+    const users = recipients || [];
+
+    let sentCount = 0;
+    let failedCount = 0;
+    let nativeCount = 0;
+    let browserCount = 0;
+
+    console.log(
+      "Eligible notification recipients:",
+      users.length
+    );
+
+    const batchSize = 50;
+
+    for (
+      let start = 0;
+      start < users.length;
+      start += batchSize
+    ) {
+      const batch = users.slice(
+        start,
+        start + batchSize
+      );
+
+      const results = await Promise.allSettled(
+        batch.map((user) =>
+          sendNasaraDailyReminderToUser(
+            user.id,
+            campaign
+          )
+        )
+      );
+
+      for (const result of results) {
+        if (
+          result.status === "fulfilled" &&
+          result.value?.success === true
+        ) {
+          sentCount++;
+
+          if (result.value.channel === "native") {
+            nativeCount++;
+          } else if (result.value.channel === "browser") {
+            browserCount++;
+          }
+        } else {
+          failedCount++;
+
+          if (result.status === "rejected") {
+            console.error(
+              "Daily reminder failed:",
+              result.reason
+            );
+          }
+        }
+      }
+    }
+
+    let finalStatus = "sent";
+
+    if (failedCount > 0 && sentCount > 0) {
+      finalStatus = "partial";
+    } else if (failedCount > 0 && sentCount === 0) {
+      finalStatus = "failed";
+    }
+
+    const { error: updateError } = await supabase
+      .from(DAILY_ENGAGEMENT_TABLE)
+      .update({
+        status: finalStatus,
+        target_count: users.length,
+        sent_count: sentCount,
+        failed_count: failedCount,
+        completed_at: new Date().toISOString()
+      })
+      .eq("notification_date", ghanaTime.date);
+
+    if (updateError) {
+      console.error(
+        "Could not update daily campaign log:",
+        updateError.message
+      );
+    }
+
+    console.log("Nasara daily campaign completed:", {
+      date: ghanaTime.date,
+      feature: campaign.featureKey,
+      targetCount: users.length,
+      sentCount,
+      failedCount,
+      nativeCount,
+      browserCount,
+      status: finalStatus
+    });
+
+  } catch (error) {
+    console.error(
+      "Nasara daily engagement campaign failed:",
+      error
+    );
+
+    if (campaignClaimed) {
+      const { error: updateError } = await supabase
+        .from(DAILY_ENGAGEMENT_TABLE)
+        .update({
+          status: "failed",
+          error_message: String(
+            error?.message || error
+          ).slice(0, 1000),
+          completed_at: new Date().toISOString()
+        })
+        .eq(
+          "notification_date",
+          ghanaTime.date
+        );
+
+      if (updateError) {
+        console.error(
+          "Could not record campaign failure:",
+          updateError.message
+        );
+      }
+    }
+  } finally {
+    dailyEngagementReminderRunning = false;
+  }
+}
+
+// ------------------------------------------------------------
+// SCHEDULE: EVERY DAY AT 8:30 AM GHANA TIME
+// ------------------------------------------------------------
+
+cron.schedule(
+  "30 8 * * *",
+  () => {
+    sendDailyEngagementReminder().catch((error) => {
+      console.error(
+        "Daily engagement cron error:",
+        error
+      );
+    });
+  },
+  {
+    timezone: "Africa/Accra"
+  }
+);
+
+// Catch up if Render starts after 8:30 AM.
+sendDailyEngagementReminder().catch((error) => {
+  console.error(
+    "Daily engagement startup error:",
+    error
+  );
+});
+
+console.log(
+  "Nasara daily reminders scheduled for 8:30 AM Ghana time."
+);
+// ============================================================
 // 🟢 START SERVER
 // ============================================================
 
