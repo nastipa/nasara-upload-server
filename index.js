@@ -9063,21 +9063,23 @@ async function runNasaraDailyEngagementCampaign() {
 
     if (historyError) throw historyError;
 
-    if (existing?.status === "sent") {
-      console.log(
-        "Nasara engagement already completed for",
-        campaignDate
-      );
-      return;
-    }
+    // --------------------------------------------------------
+// STOP DUPLICATE DAILY NOTIFICATIONS
+// A campaign can only run once per Ghana calendar date.
+// This applies to sent, partial, failed and processing.
+// --------------------------------------------------------
 
-    if (existing?.status === "processing") {
-      console.log(
-        "Nasara engagement is already processing for",
-        campaignDate
-      );
-      return;
+if (existing) {
+  console.log(
+    "Nasara engagement already attempted today:",
+    {
+      date: campaignDate,
+      status: existing.status,
     }
+  );
+
+  return;
+}
 
     // --------------------------------------------------------
     // 2. CREATE OR REOPEN TODAY'S CLAIM
