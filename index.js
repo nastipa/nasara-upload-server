@@ -9083,11 +9083,20 @@ app.post("/admin/engagement/test", async (req, res) => {
 // ------------------------------------------------------------
 // Daily scheduler
 // Runs every minute and checks the configured Ghana time.
-// A date can only be claimed once because history uses
-// notification_date as its primary key.
+// Also supports startup catch-up if Render starts late.
+// A date can only be claimed once using notification_date.
 // ------------------------------------------------------------
 
+let nasaraDailyEngagementRunning = false;
+
 async function runNasaraDailyEngagementCampaign() {
+  if (nasaraDailyEngagementRunning) {
+    console.log("Nasara engagement reminder is already running.");
+    return;
+  }
+
+  nasaraDailyEngagementRunning = true;
+
   const ghanaTime = getNasaraGhanaDateTime();
 
   try {
@@ -9101,12 +9110,25 @@ async function runNasaraDailyEngagementCampaign() {
     if (settingsError) throw settingsError;
     if (!settings || settings.enabled !== true) return;
 
-    if (
-      ghanaTime.hour !== settings.send_hour ||
-      ghanaTime.minute !== settings.send_minute
-    ) {
+    // --------------------------------------------------------
+    // SEND AT OR AFTER THE SAVED TIME.
+    // This allows a late Render startup to catch up.
+    // --------------------------------------------------------
+
+    const currentMinutes =
+      ghanaTime.hour * 60 + ghanaTime.minute;
+
+    const scheduledMinutes =
+      Number(settings.send_hour) * 60 +
+      Number(settings.send_minute);
+
+    if (currentMinutes < scheduledMinutes) {
       return;
     }
+
+    // --------------------------------------------------------
+    // GET TODAY'S ACTIVE CAMPAIGN
+    // --------------------------------------------------------
 
     const { data: campaign, error: campaignError } =
       await supabaseAdmin
@@ -9117,6 +9139,7 @@ async function runNasaraDailyEngagementCampaign() {
         .maybeSingle();
 
     if (campaignError) throw campaignError;
+
     if (!campaign) {
       console.log(
         "Nasara engagement: no active campaign for weekday",
@@ -9125,7 +9148,11 @@ async function runNasaraDailyEngagementCampaign() {
       return;
     }
 
-    // Claim the date before sending to prevent duplicate runs.
+    // --------------------------------------------------------
+    // CLAIM TODAY'S NOTIFICATION.
+    // The unique notification_date prevents duplicate sends.
+    // --------------------------------------------------------
+
     const { error: claimError } = await supabaseAdmin
       .from(NASARA_ENGAGEMENT_HISTORY)
       .insert({
@@ -9152,19 +9179,40 @@ async function runNasaraDailyEngagementCampaign() {
       throw claimError;
     }
 
-    const { data: users, error: usersError } = await supabaseAdmin
-      .from("profiles")
-      .select("id")
-      .eq("notifications_enabled", true)
-      .eq("is_banned", false);
+    console.log("NASARA DAILY ENGAGEMENT STARTED:", {
+      date: ghanaTime.date,
+      scheduledTime:
+        `${String(settings.send_hour).padStart(2, "0")}:` +
+        `${String(settings.send_minute).padStart(2, "0")}`,
+      actualTime:
+        `${String(ghanaTime.hour).padStart(2, "0")}:` +
+        `${String(ghanaTime.minute).padStart(2, "0")}`,
+      feature: campaign.feature_key,
+    });
+
+    // --------------------------------------------------------
+    // GET ELIGIBLE USERS
+    // --------------------------------------------------------
+
+    const { data: users, error: usersError } =
+      await supabaseAdmin
+        .from("profiles")
+        .select("id")
+        .eq("notifications_enabled", true)
+        .eq("is_banned", false);
 
     if (usersError) throw usersError;
 
     const targetUsers = users || [];
+
     let sentCount = 0;
     let failedCount = 0;
 
-    // Send in small batches to avoid overwhelming the services.
+    // --------------------------------------------------------
+    // SEND NATIVE + BROWSER NOTIFICATIONS
+    // Keep the existing working delivery function unchanged.
+    // --------------------------------------------------------
+
     const batchSize = 25;
 
     for (
@@ -9195,6 +9243,10 @@ async function runNasaraDailyEngagementCampaign() {
       }
     }
 
+    // --------------------------------------------------------
+    // SAVE FINAL RESULT
+    // --------------------------------------------------------
+
     let status = "sent";
 
     if (failedCount > 0 && sentCount > 0) {
@@ -9216,7 +9268,7 @@ async function runNasaraDailyEngagementCampaign() {
 
     if (updateError) throw updateError;
 
-    console.log("Nasara daily engagement completed:", {
+    console.log("NASARA DAILY ENGAGEMENT COMPLETED:", {
       date: ghanaTime.date,
       feature: campaign.feature_key,
       target: targetUsers.length,
@@ -9224,14 +9276,16 @@ async function runNasaraDailyEngagementCampaign() {
       failed: failedCount,
       status,
     });
+
   } catch (error) {
     console.error(
       "Nasara daily engagement scheduler error:",
       error
     );
+  } finally {
+    nasaraDailyEngagementRunning = false;
   }
 }
-
 
 // ------------------------------------------------------------
 // Register scheduler
