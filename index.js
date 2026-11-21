@@ -8968,6 +8968,576 @@ sendDailyEngagementReminder().catch((error) => {
 console.log(
   "Nasara daily reminders scheduled for 8:30 AM Ghana time."
 );
+
+// ============================================================
+// NASARA ENGAGEMENT MANAGER
+// Admin API + configurable daily reminders
+// Ghana timezone: Africa/Accra
+// ============================================================
+
+const NASARA_ENGAGEMENT_SETTINGS =
+  "nasara_engagement_settings";
+
+const NASARA_ENGAGEMENT_CAMPAIGNS =
+  "nasara_engagement_campaigns";
+
+const NASARA_ENGAGEMENT_HISTORY =
+  "nasara_daily_engagement_notifications";
+
+const NASARA_ENGAGEMENT_TIMEZONE = "Africa/Accra";
+
+// ------------------------------------------------------------
+// Ghana date and time helpers
+// ------------------------------------------------------------
+
+function getNasaraGhanaDateTime() {
+  const now = new Date();
+
+  const parts = new Intl.DateTimeFormat("en-GB", {
+    timeZone: NASARA_ENGAGEMENT_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    weekday: "short",
+    hourCycle: "h23",
+  }).formatToParts(now);
+
+  const values = {};
+
+  for (const part of parts) {
+    values[part.type] = part.value;
+  }
+
+  const weekdayMap = {
+    Sun: 0,
+    Mon: 1,
+    Tue: 2,
+    Wed: 3,
+    Thu: 4,
+    Fri: 5,
+    Sat: 6,
+  };
+
+  return {
+    date: `${values.year}-${values.month}-${values.day}`,
+    hour: Number(values.hour),
+    minute: Number(values.minute),
+    weekday: weekdayMap[values.weekday],
+  };
+}
+
+
+// ------------------------------------------------------------
+// Admin API: Get settings, campaigns and recent history
+// ------------------------------------------------------------
+
+app.get("/admin/engagement", async (req, res) => {
+  try {
+    const admin = await authenticateNasaraAdminRequest(req, res);
+    if (!admin) return;
+
+    const [
+      settingsResult,
+      campaignsResult,
+      historyResult,
+    ] = await Promise.all([
+      supabase
+        .from(NASARA_ENGAGEMENT_SETTINGS)
+        .select("*")
+        .eq("id", 1)
+        .maybeSingle(),
+
+      supabase
+        .from(NASARA_ENGAGEMENT_CAMPAIGNS)
+        .select("*")
+        .order("weekday", { ascending: true }),
+
+      supabase
+        .from(NASARA_ENGAGEMENT_HISTORY)
+        .select("*")
+        .order("notification_date", { ascending: false })
+        .limit(30),
+    ]);
+
+    if (settingsResult.error) {
+      throw settingsResult.error;
+    }
+
+    if (campaignsResult.error) {
+      throw campaignsResult.error;
+    }
+
+    if (historyResult.error) {
+      throw historyResult.error;
+    }
+
+    return res.json({
+      success: true,
+      settings: settingsResult.data,
+      campaigns: campaignsResult.data || [],
+      history: historyResult.data || [],
+    });
+  } catch (error) {
+    console.error("Engagement dashboard error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not load engagement manager.",
+    });
+  }
+});
+
+
+// ------------------------------------------------------------
+// Admin API: Update global settings
+// ------------------------------------------------------------
+
+app.put("/admin/engagement/settings", async (req, res) => {
+  try {
+    const admin = await authenticateNasaraAdminRequest(req, res);
+    if (!admin) return;
+
+    const { enabled, send_hour, send_minute } = req.body;
+
+    if (
+      typeof enabled !== "boolean" ||
+      !Number.isInteger(send_hour) ||
+      send_hour < 0 ||
+      send_hour > 23 ||
+      !Number.isInteger(send_minute) ||
+      send_minute < 0 ||
+      send_minute > 59
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid engagement settings.",
+      });
+    }
+
+    const { data, error } = await supabase
+      .from(NASARA_ENGAGEMENT_SETTINGS)
+      .upsert({
+        id: 1,
+        enabled,
+        send_hour,
+        send_minute,
+        updated_at: new Date().toISOString(),
+        updated_by: admin.id,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      settings: data,
+    });
+  } catch (error) {
+    console.error("Update engagement settings error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not update engagement settings.",
+    });
+  }
+});
+
+
+// ------------------------------------------------------------
+// Admin API: Update a weekday campaign
+// ------------------------------------------------------------
+
+app.put(
+  "/admin/engagement/campaigns/:weekday",
+  async (req, res) => {
+    try {
+      const admin = await authenticateNasaraAdminRequest(req, res);
+      if (!admin) return;
+
+      const weekday = Number(req.params.weekday);
+      const { feature_key, title, body, enabled } = req.body;
+
+      if (
+        !Number.isInteger(weekday) ||
+        weekday < 0 ||
+        weekday > 6 ||
+        typeof feature_key !== "string" ||
+        !feature_key.trim() ||
+        typeof title !== "string" ||
+        !title.trim() ||
+        typeof body !== "string" ||
+        !body.trim() ||
+        typeof enabled !== "boolean"
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid campaign details.",
+        });
+      }
+
+      const { data, error } = await supabase
+        .from(NASARA_ENGAGEMENT_CAMPAIGNS)
+        .upsert({
+          weekday,
+          feature_key: feature_key.trim(),
+          title: title.trim(),
+          body: body.trim(),
+          enabled,
+          updated_at: new Date().toISOString(),
+          updated_by: admin.id,
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      return res.json({
+        success: true,
+        campaign: data,
+      });
+    } catch (error) {
+      console.error("Update engagement campaign error:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: "Could not save campaign.",
+      });
+    }
+  }
+);
+
+
+// ------------------------------------------------------------
+// Admin API: Campaign history
+// ------------------------------------------------------------
+
+app.get("/admin/engagement/history", async (req, res) => {
+  try {
+    const admin = await authenticateNasaraAdminRequest(req, res);
+    if (!admin) return;
+
+    const { data, error } = await supabase
+      .from(NASARA_ENGAGEMENT_HISTORY)
+      .select("*")
+      .order("notification_date", { ascending: false })
+      .limit(60);
+
+    if (error) throw error;
+
+    return res.json({
+      success: true,
+      history: data || [],
+    });
+  } catch (error) {
+    console.error("Engagement history error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not load campaign history.",
+    });
+  }
+});
+
+
+// ------------------------------------------------------------
+// Send one reminder to one user
+// Native push first; browser push is the fallback.
+// ------------------------------------------------------------
+
+async function sendNasaraEngagementReminder(
+  userId,
+  campaign
+) {
+  try {
+    const nativeResult = await notifyUser(
+      userId,
+      campaign.title,
+      campaign.body,
+      {
+        type: "daily_engagement",
+        feature_key: campaign.feature_key,
+        url: "/",
+      }
+    );
+
+    if (nativeResult && nativeResult.success === true) {
+      return {
+        success: true,
+        channel: "native",
+      };
+    }
+
+    const browserResult = await sendBrowserPushToUser(
+      userId,
+      campaign.title,
+      campaign.body,
+      "/",
+      {
+        type: "daily_engagement",
+        tag: `nasara-daily-${campaign.feature_key}`,
+        extraData: {
+          type: "daily_engagement",
+          feature_key: campaign.feature_key,
+        },
+      }
+    );
+
+    if (
+      browserResult &&
+      browserResult.sent > 0
+    ) {
+      return {
+        success: true,
+        channel: "browser",
+      };
+    }
+
+    return {
+      success: false,
+      reason: "No notification channel accepted the reminder.",
+    };
+  } catch (error) {
+    console.error(
+      "Engagement reminder failed for user:",
+      userId,
+      error
+    );
+
+    return {
+      success: false,
+      reason: error.message,
+    };
+  }
+}
+
+
+// ------------------------------------------------------------
+// Admin API: Send a test reminder to the logged-in admin
+// ------------------------------------------------------------
+
+app.post("/admin/engagement/test", async (req, res) => {
+  try {
+    const admin = await authenticateNasaraAdminRequest(req, res);
+    if (!admin) return;
+
+    const title =
+      typeof req.body?.title === "string" &&
+      req.body.title.trim()
+        ? req.body.title.trim()
+        : "Nasara test notification";
+
+    const body =
+      typeof req.body?.body === "string" &&
+      req.body.body.trim()
+        ? req.body.body.trim()
+        : "Your Nasara notifications are connected.";
+
+    const result = await sendNasaraEngagementReminder(
+      admin.id,
+      {
+        feature_key: "admin_test",
+        title,
+        body,
+      }
+    );
+
+    if (!result.success) {
+      return res.status(502).json({
+        success: false,
+        message: "The test notification could not be sent.",
+        details: result.reason,
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Test notification accepted.",
+      channel: result.channel,
+    });
+  } catch (error) {
+    console.error("Engagement test error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Could not send test notification.",
+    });
+  }
+});
+
+
+// ------------------------------------------------------------
+// Daily scheduler
+// Runs every minute and checks the configured Ghana time.
+// A date can only be claimed once because history uses
+// notification_date as its primary key.
+// ------------------------------------------------------------
+
+async function runNasaraDailyEngagementCampaign() {
+  const ghanaTime = getNasaraGhanaDateTime();
+
+  try {
+    const { data: settings, error: settingsError } =
+      await supabase
+        .from(NASARA_ENGAGEMENT_SETTINGS)
+        .select("*")
+        .eq("id", 1)
+        .maybeSingle();
+
+    if (settingsError) throw settingsError;
+    if (!settings || settings.enabled !== true) return;
+
+    if (
+      ghanaTime.hour !== settings.send_hour ||
+      ghanaTime.minute !== settings.send_minute
+    ) {
+      return;
+    }
+
+    const { data: campaign, error: campaignError } =
+      await supabase
+        .from(NASARA_ENGAGEMENT_CAMPAIGNS)
+        .select("*")
+        .eq("weekday", ghanaTime.weekday)
+        .eq("enabled", true)
+        .maybeSingle();
+
+    if (campaignError) throw campaignError;
+    if (!campaign) {
+      console.log(
+        "Nasara engagement: no active campaign for weekday",
+        ghanaTime.weekday
+      );
+      return;
+    }
+
+    // Claim the date before sending to prevent duplicate runs.
+    const { error: claimError } = await supabase
+      .from(NASARA_ENGAGEMENT_HISTORY)
+      .insert({
+        notification_date: ghanaTime.date,
+        feature_key: campaign.feature_key,
+        title: campaign.title,
+        body: campaign.body,
+        status: "processing",
+        target_count: 0,
+        sent_count: 0,
+        failed_count: 0,
+        started_at: new Date().toISOString(),
+      });
+
+    if (claimError) {
+      if (claimError.code === "23505") {
+        console.log(
+          "Nasara engagement already claimed for",
+          ghanaTime.date
+        );
+        return;
+      }
+
+      throw claimError;
+    }
+
+    const { data: users, error: usersError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("notifications_enabled", true)
+      .eq("is_banned", false);
+
+    if (usersError) throw usersError;
+
+    const targetUsers = users || [];
+    let sentCount = 0;
+    let failedCount = 0;
+
+    // Send in small batches to avoid overwhelming the services.
+    const batchSize = 25;
+
+    for (
+      let start = 0;
+      start < targetUsers.length;
+      start += batchSize
+    ) {
+      const batch = targetUsers.slice(
+        start,
+        start + batchSize
+      );
+
+      const results = await Promise.all(
+        batch.map((user) =>
+          sendNasaraEngagementReminder(
+            user.id,
+            campaign
+          )
+        )
+      );
+
+      for (const result of results) {
+        if (result.success) {
+          sentCount += 1;
+        } else {
+          failedCount += 1;
+        }
+      }
+    }
+
+    let status = "sent";
+
+    if (failedCount > 0 && sentCount > 0) {
+      status = "partial";
+    } else if (failedCount > 0 && sentCount === 0) {
+      status = "failed";
+    }
+
+    const { error: updateError } = await supabase
+      .from(NASARA_ENGAGEMENT_HISTORY)
+      .update({
+        status,
+        target_count: targetUsers.length,
+        sent_count: sentCount,
+        failed_count: failedCount,
+        completed_at: new Date().toISOString(),
+      })
+      .eq("notification_date", ghanaTime.date);
+
+    if (updateError) throw updateError;
+
+    console.log("Nasara daily engagement completed:", {
+      date: ghanaTime.date,
+      feature: campaign.feature_key,
+      target: targetUsers.length,
+      sent: sentCount,
+      failed: failedCount,
+      status,
+    });
+  } catch (error) {
+    console.error(
+      "Nasara daily engagement scheduler error:",
+      error
+    );
+  }
+}
+
+
+// ------------------------------------------------------------
+// Register scheduler
+// node-cron is already used by the existing backend.
+// Do not remove or change the Friday Market scheduler.
+// ------------------------------------------------------------
+
+cron.schedule(
+  "* * * * *",
+  runNasaraDailyEngagementCampaign,
+  {
+    timezone: NASARA_ENGAGEMENT_TIMEZONE,
+  }
+);
+
+console.log(
+  "Nasara Engagement Manager scheduler registered."
+);
 // ============================================================
 // 🟢 START SERVER
 // ============================================================
