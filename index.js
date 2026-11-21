@@ -706,15 +706,14 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     payment: true,
     products: ["battle"],
   },
-
-  friday_market_payment: {
-    table: "payments",
-    title: "New Friday Market Payment",
-    description: "Friday Market payment submitted for verification",
-    priority: "high",
-    payment: true,
-    products: ["friday_market"],
-  },
+friday_market_payment: {
+  table: "friday_market_registrations",
+  ownerColumn: "seller_id",
+  title: "New Friday Market Registration",
+  description: "A seller has submitted a Friday Market registration and GH₵50 payment for verification",
+  priority: "high",
+  registration: true,
+},
 
 
   // ==========================================================
@@ -940,15 +939,18 @@ app.post(
       // VERIFY SUBMISSION BELONGS TO AUTHENTICATED USER
       // ------------------------------------------------------
 
-      const {
-        data: submission,
-        error: submissionError,
-      } = await supabaseAdmin
-        .from(config.table)
-        .select("*")
-        .eq("id", referenceId)
-        .eq("user_id", user.id)
-        .maybeSingle();
+      const ownerColumn =
+  config.ownerColumn || "user_id";
+
+const {
+  data: submission,
+  error: submissionError,
+} = await supabaseAdmin
+  .from(config.table)
+  .select("*")
+  .eq("id", referenceId)
+  .eq(ownerColumn, user.id)
+  .maybeSingle();
 
       if (submissionError) {
         console.error(
@@ -1000,7 +1002,36 @@ app.post(
           });
         }
       }
+      
+      // ------------------------------------------------------
+// VERIFY FRIDAY MARKET REGISTRATION SUBMISSIONS
+// ------------------------------------------------------
 
+if (config.registration) {
+
+  if (
+    submission.payment_status !== "pending_review" ||
+    submission.registration_status !== "pending_review"
+  ) {
+    return res.status(400).json({
+      success: false,
+      error: "Friday Market registration is not awaiting verification.",
+    });
+  }
+
+  if (
+    Number(submission.fee_amount) !== 50 ||
+    submission.currency !== "GHS" ||
+    submission.payment_method !== "MTN MoMo" ||
+    !submission.transaction_reference ||
+    !String(submission.transaction_reference).trim()
+  ) {
+    return res.status(400).json({
+      success: false,
+      error: "Friday Market payment details are incomplete or invalid.",
+    });
+  }
+}
 
       // ------------------------------------------------------
       // PREVENT DUPLICATE NOTIFICATIONS
@@ -1042,11 +1073,16 @@ app.post(
       // PREPARE NOTIFICATION
       // ------------------------------------------------------
 
-      const amount =
-        submission.amount !== undefined &&
-        submission.amount !== null
-          ? ` GH₵${submission.amount}`
-          : "";
+     const submittedAmount =
+  config.registration
+    ? submission.fee_amount
+    : submission.amount;
+
+const amount =
+  submittedAmount !== undefined &&
+  submittedAmount !== null
+    ? ` GH₵${submittedAmount}`
+    : "";
 
 
       // ------------------------------------------------------
