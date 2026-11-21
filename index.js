@@ -8936,7 +8936,9 @@ async function sendNasaraEngagementReminder(
   };
 }
 // ------------------------------------------------------------
-// Admin API: Send a test reminder to the logged-in admin
+// Admin API: Send a test reminder
+// Native: logged-in admin only
+// Browser: all registered browser subscriptions
 // ------------------------------------------------------------
 
 app.post("/admin/engagement/test", async (req, res) => {
@@ -8956,39 +8958,128 @@ app.post("/admin/engagement/test", async (req, res) => {
         ? req.body.body.trim()
         : "Your Nasara notifications are connected.";
 
-    const result = await sendNasaraEngagementReminder(
-      admin.id,
-      {
-        feature_key: "admin_test",
+    let nativeResult = null;
+    let browserResult = null;
+
+    let nativeError = null;
+    let browserError = null;
+
+    // --------------------------------------------------------
+    // 1. SEND NATIVE NOTIFICATION TO THE LOGGED-IN ADMIN
+    // --------------------------------------------------------
+
+    try {
+      nativeResult = await notifyUser(
+        admin.id,
         title,
         body,
-      }
-    );
+        {
+          type: "daily_engagement",
+          feature_key: "admin_test",
+          url: "/",
+        }
+      );
+    } catch (error) {
+      nativeError = error?.message || String(error);
 
-    if (!result.success) {
+      console.error(
+        "Engagement test native notification error:",
+        error
+      );
+    }
+
+    // --------------------------------------------------------
+    // 2. SEND BROWSER NOTIFICATION
+    // Uses the same broadcast mechanism as working
+    // Nasara browser notifications.
+    // --------------------------------------------------------
+
+    try {
+      browserResult = await broadcastBrowserPush(
+        title,
+        body,
+        "/"
+      );
+    } catch (error) {
+      browserError = error?.message || String(error);
+
+      console.error(
+        "Engagement test browser notification error:",
+        error
+      );
+    }
+
+    // --------------------------------------------------------
+    // 3. CHECK RESULTS
+    // --------------------------------------------------------
+
+    const nativeAccepted =
+      nativeResult?.success === true;
+
+    const browserSent =
+      Number(browserResult?.sent || 0);
+
+    const browserAccepted =
+      browserSent > 0;
+
+    console.log("NASARA ENGAGEMENT TEST RESULTS:", {
+      adminId: admin.id,
+      nativeAccepted,
+      browserAccepted,
+      browserSent,
+      browserFailed: Number(browserResult?.failed || 0),
+      nativeError,
+      browserError,
+    });
+
+    // --------------------------------------------------------
+    // 4. NEITHER CHANNEL ACCEPTED THE NOTIFICATION
+    // --------------------------------------------------------
+
+    if (!nativeAccepted && !browserAccepted) {
       return res.status(502).json({
         success: false,
-        message: "The test notification could not be sent.",
-        details: result.reason,
+        message: "Neither notification channel confirmed acceptance.",
+        native: false,
+        browser: false,
+        browserSent,
+        details: {
+          nativeError,
+          browserError,
+          browserResult,
+        },
       });
     }
 
+    // --------------------------------------------------------
+    // 5. AT LEAST ONE CHANNEL ACCEPTED THE NOTIFICATION
+    // --------------------------------------------------------
+
     return res.json({
       success: true,
-      message: "Test notification accepted.",
-      channel: result.channel,
+      message: "Test notification processing completed.",
+      channel:
+        nativeAccepted && browserAccepted
+          ? "native_and_browser"
+          : nativeAccepted
+            ? "native"
+            : "browser",
+      native: nativeAccepted,
+      browser: browserAccepted,
+      browserSent,
+      browserFailed: Number(browserResult?.failed || 0),
     });
+
   } catch (error) {
     console.error("Engagement test error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Could not send test notification.",
+      details: error?.message || String(error),
     });
   }
 });
-
-
 // ------------------------------------------------------------
 // Daily scheduler
 // Runs every minute and checks the configured Ghana time.
