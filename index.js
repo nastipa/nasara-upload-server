@@ -8801,15 +8801,26 @@ app.get("/admin/engagement/history", async (req, res) => {
 
 // ------------------------------------------------------------
 // Send one reminder to one user
-// Native push first; browser push is the fallback.
+// Send to native AND browser independently.
+// Neither channel depends on the other failing.
 // ------------------------------------------------------------
 
 async function sendNasaraEngagementReminder(
   userId,
   campaign
 ) {
+  let nativeResult = null;
+  let browserResult = null;
+
+  let nativeError = null;
+  let browserError = null;
+
+  // ----------------------------------------------------------
+  // 1. ATTEMPT NATIVE PUSH
+  // ----------------------------------------------------------
+
   try {
-    const nativeResult = await notifyUser(
+    nativeResult = await notifyUser(
       userId,
       campaign.title,
       campaign.body,
@@ -8819,15 +8830,22 @@ async function sendNasaraEngagementReminder(
         url: "/",
       }
     );
+  } catch (error) {
+    nativeError = error.message || String(error);
 
-    if (nativeResult && nativeResult.success === true) {
-      return {
-        success: true,
-        channel: "native",
-      };
-    }
+    console.error(
+      "Engagement native notification failed:",
+      userId,
+      nativeError
+    );
+  }
 
-    const browserResult = await sendBrowserPushToUser(
+  // ----------------------------------------------------------
+  // 2. ATTEMPT BROWSER PUSH REGARDLESS OF NATIVE RESULT
+  // ----------------------------------------------------------
+
+  try {
+    browserResult = await sendBrowserPushToUser(
       userId,
       campaign.title,
       campaign.body,
@@ -8841,35 +8859,82 @@ async function sendNasaraEngagementReminder(
         },
       }
     );
-
-    if (
-      browserResult &&
-      browserResult.sent > 0
-    ) {
-      return {
-        success: true,
-        channel: "browser",
-      };
-    }
-
-    return {
-      success: false,
-      reason: "No notification channel accepted the reminder.",
-    };
   } catch (error) {
-    console.error(
-      "Engagement reminder failed for user:",
-      userId,
-      error
-    );
+    browserError = error.message || String(error);
 
+    console.error(
+      "Engagement browser notification failed:",
+      userId,
+      browserError
+    );
+  }
+
+  // ----------------------------------------------------------
+  // 3. DETERMINE DELIVERY RESULTS INDEPENDENTLY
+  // ----------------------------------------------------------
+
+  const nativeAccepted =
+    nativeResult?.success === true;
+
+  const browserSent =
+    Number(browserResult?.sent || 0);
+
+  const browserAccepted =
+    browserSent > 0;
+
+  console.log("Nasara engagement delivery:", {
+    userId,
+    nativeAccepted,
+    browserSent,
+    nativeError,
+    browserError,
+  });
+
+  // ----------------------------------------------------------
+  // 4. REPORT SUCCESS IF AT LEAST ONE CHANNEL ACCEPTED
+  // ----------------------------------------------------------
+
+  if (nativeAccepted && browserAccepted) {
     return {
-      success: false,
-      reason: error.message,
+      success: true,
+      channel: "native_and_browser",
+      native: true,
+      browser: true,
+      browserSent,
     };
   }
-}
 
+  if (nativeAccepted) {
+    return {
+      success: true,
+      channel: "native",
+      native: true,
+      browser: false,
+      browserSent,
+    };
+  }
+
+  if (browserAccepted) {
+    return {
+      success: true,
+      channel: "browser",
+      native: false,
+      browser: true,
+      browserSent,
+    };
+  }
+
+  return {
+    success: false,
+    channel: "none",
+    reason:
+      "Neither native nor browser notification delivery was accepted.",
+    nativeError,
+    browserError,
+    nativeResult,
+    browserResult,
+  };
+}
 // ------------------------------------------------------------
 // Admin API: Send a test reminder to the logged-in admin
 // ------------------------------------------------------------
