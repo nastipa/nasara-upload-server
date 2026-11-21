@@ -706,6 +706,7 @@ const NASARA_ADMIN_EVENT_CONFIG = {
     payment: true,
     products: ["battle"],
   },
+
 friday_market_payment: {
   table: "friday_market_registrations",
   ownerColumn: "seller_id",
@@ -715,6 +716,18 @@ friday_market_payment: {
   registration: true,
 },
 
+// ==========================================================
+// DELIVERY - CUSTOMER DELIVERY PAYMENT REQUESTS
+// ==========================================================
+
+delivery_payment_request: {
+  table: "deliveries",
+  ownerColumn: "customer_id",
+  title: "New Delivery Payment Request",
+  description: "A customer has submitted a delivery request requiring payment verification",
+  priority: "high",
+  deliveryRequest: true,
+},
 
 
   // ==========================================================
@@ -1035,21 +1048,22 @@ if (config.registration) {
 }
 
 // ------------------------------------------------------
-      // VERIFY DELIVERY PAYMENT SUBMISSIONS
-      // ------------------------------------------------------
+// VERIFY DELIVERY PAYMENT SUBMISSIONS
+// ------------------------------------------------------
 
-      if (config.deliveryRequest) {
-        if (
-          submission.payment_status !== "pending" ||
-          submission.status !== "pending_payment" ||
-          Number(submission.amount) <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            error: "Delivery request is not awaiting payment verification.",
-          });
-        }
-      }
+if (config.deliveryRequest) {
+  if (
+    submission.payment_status !== "pending" ||
+    submission.status !== "pending_payment" ||
+    !Number.isFinite(Number(submission.amount)) ||
+    Number(submission.amount) <= 0
+  ) {
+    return res.status(400).json({
+      success: false,
+      error: "Delivery request is not awaiting payment verification.",
+    });
+  }
+}
 
       // ------------------------------------------------------
       // PREVENT DUPLICATE NOTIFICATIONS
