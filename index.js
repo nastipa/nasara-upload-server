@@ -9001,7 +9001,7 @@ async function runNasaraDailyEngagementCampaign() {
 
   try {
     const { data: settings, error: settingsError } =
-      await supabase
+      await supabaseAdmin
         .from(NASARA_ENGAGEMENT_SETTINGS)
         .select("*")
         .eq("id", 1)
@@ -9018,7 +9018,7 @@ async function runNasaraDailyEngagementCampaign() {
     }
 
     const { data: campaign, error: campaignError } =
-      await supabase
+      await supabaseAdmin
         .from(NASARA_ENGAGEMENT_CAMPAIGNS)
         .select("*")
         .eq("weekday", ghanaTime.weekday)
@@ -9035,7 +9035,7 @@ async function runNasaraDailyEngagementCampaign() {
     }
 
     // Claim the date before sending to prevent duplicate runs.
-    const { error: claimError } = await supabase
+    const { error: claimError } = await supabaseAdmin
       .from(NASARA_ENGAGEMENT_HISTORY)
       .insert({
         notification_date: ghanaTime.date,
@@ -9061,7 +9061,7 @@ async function runNasaraDailyEngagementCampaign() {
       throw claimError;
     }
 
-    const { data: users, error: usersError } = await supabase
+    const { data: users, error: usersError } = await supabaseAdmin
       .from("profiles")
       .select("id")
       .eq("notifications_enabled", true)
@@ -9112,7 +9112,7 @@ async function runNasaraDailyEngagementCampaign() {
       status = "failed";
     }
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await supabaseAdmin
       .from(NASARA_ENGAGEMENT_HISTORY)
       .update({
         status,
