@@ -2445,17 +2445,27 @@ app.post("/marketplace/orders/create", async (req, res) => {
       success: true,
       message: "Your marketplace orders have been created.",
       orders: createdOrders.map((order) => ({
-        id: order.id,
-        order_number: order.order_number,
-        seller_id: order.seller_id,
-        seller_name: order.seller_name,
-        subtotal: order.subtotal,
-        total_amount: order.total_amount,
-        currency: order.currency,
-        payment_status: order.payment_status,
-        order_status: order.order_status,
-        item_count: order.item_count,
-      })),
+  id: order.id,
+  order_number: order.order_number,
+
+  buyer_id: order.buyer_id,
+  seller_id: order.seller_id,
+
+  seller_name: order.seller_name,
+
+  // Seller's payment details saved on this order
+  seller_momo_name: order.seller_momo_name,
+  seller_momo_number: order.seller_momo_number,
+
+  subtotal: order.subtotal,
+  total_amount: order.total_amount,
+  currency: order.currency,
+
+  payment_status: order.payment_status,
+  order_status: order.order_status,
+
+  item_count: order.item_count,
+})),
       total_orders: createdOrders.length,
       notifications_attempted: notificationResults.length,
     });
