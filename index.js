@@ -2132,9 +2132,9 @@ app.post("/marketplace/orders/create", async (req, res) => {
 
     const productIds = Array.from(quantities.keys());
 
-    // --------------------------------------------------------
+   // --------------------------------------------------------
     // 3. FETCH AUTHORITATIVE PRODUCT INFORMATION
-    // Never trust prices or seller IDs supplied by the app.
+    // Actual items_live ownership column is user_id.
     // --------------------------------------------------------
 
     const {
@@ -2142,24 +2142,24 @@ app.post("/marketplace/orders/create", async (req, res) => {
       error: productsError,
     } = await supabaseAdmin
       .from("items_live")
-      .select("id,title,price,seller_id,image_urls")
+      .select("id,title,price,user_id,image_urls")
       .in("id", productIds);
 
     if (productsError) {
-  console.error("NASARA MARKETPLACE PRODUCT LOOKUP FAILED:", {
-    message: productsError.message,
-    code: productsError.code,
-    details: productsError.details,
-    hint: productsError.hint,
-  });
+      console.error("NASARA MARKETPLACE PRODUCT LOOKUP FAILED:", {
+        message: productsError.message,
+        code: productsError.code,
+        details: productsError.details,
+        hint: productsError.hint,
+      });
 
-  return res.status(500).json({
-    success: false,
-    error: "Unable to verify the products in your cart.",
-    details: productsError.message,
-    code: productsError.code,
-  });
-}
+      return res.status(500).json({
+        success: false,
+        error: "Unable to verify the products in your cart.",
+        details: productsError.message,
+        code: productsError.code,
+      });
+    }
 
     if (!products || products.length !== productIds.length) {
       return res.status(400).json({
@@ -2168,14 +2168,19 @@ app.post("/marketplace/orders/create", async (req, res) => {
       });
     }
 
+    
+    
     // --------------------------------------------------------
     // 4. GROUP PRODUCTS BY SELLER
+    // Actual items_live seller ownership column is user_id.
     // --------------------------------------------------------
 
     const sellerGroups = new Map();
 
     for (const product of products) {
-      if (!product.seller_id) {
+      const sellerId = product.user_id;
+
+      if (!sellerId) {
         return res.status(400).json({
           success: false,
           error: `Product "${product.title}" has no valid seller.`,
@@ -2194,15 +2199,15 @@ app.post("/marketplace/orders/create", async (req, res) => {
       const quantity = quantities.get(String(product.id));
       const lineTotal = Math.round(price * quantity * 100) / 100;
 
-      if (!sellerGroups.has(product.seller_id)) {
-        sellerGroups.set(product.seller_id, {
-          seller_id: product.seller_id,
+      if (!sellerGroups.has(sellerId)) {
+        sellerGroups.set(sellerId, {
+          seller_id: sellerId,
           items: [],
           subtotal: 0,
         });
       }
 
-      const group = sellerGroups.get(product.seller_id);
+      const group = sellerGroups.get(sellerId);
 
       group.items.push({
         product_id: String(product.id),
@@ -2220,7 +2225,6 @@ app.post("/marketplace/orders/create", async (req, res) => {
     }
 
     const sellerIds = Array.from(sellerGroups.keys());
-
     // --------------------------------------------------------
     // 5. FETCH SELLER PROFILES AND MOMO DETAILS
     // --------------------------------------------------------
