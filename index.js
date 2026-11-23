@@ -2146,13 +2146,20 @@ app.post("/marketplace/orders/create", async (req, res) => {
       .in("id", productIds);
 
     if (productsError) {
-      console.error("Marketplace product lookup:", productsError);
+  console.error("NASARA MARKETPLACE PRODUCT LOOKUP FAILED:", {
+    message: productsError.message,
+    code: productsError.code,
+    details: productsError.details,
+    hint: productsError.hint,
+  });
 
-      return res.status(500).json({
-        success: false,
-        error: "Unable to verify the products in your cart.",
-      });
-    }
+  return res.status(500).json({
+    success: false,
+    error: "Unable to verify the products in your cart.",
+    details: productsError.message,
+    code: productsError.code,
+  });
+}
 
     if (!products || products.length !== productIds.length) {
       return res.status(400).json({
