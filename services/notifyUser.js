@@ -77,7 +77,7 @@ async function notifyUser(
           title,
           body,
           data: {
-            type: "chat",
+            type: extraData?.type || "chat",
             ...(extraData &&
             typeof extraData === "object" &&
             !Array.isArray(extraData)

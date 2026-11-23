@@ -1194,6 +1194,2759 @@ const amount =
 
   }
 );
+
+
+// ============================================================
+// NASARA MARKETPLACE
+// BUYER PAYMENT DECLARATION
+//
+// POST /marketplace/orders/:orderId/payment-declared
+//
+// Notifies:
+// 1. Seller - In-app + Android + Browser
+// 2. Nasara Admin - In-app + Android + Browser
+//
+// IMPORTANT:
+// Buyer declaration is NOT payment confirmation.
+// Seller must verify actual MoMo receipt.
+// ============================================================
+
+app.post(
+  "/marketplace/orders/:orderId/payment-declared",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE BUYER
+      // ------------------------------------------------------
+
+      const authorization = req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Login required.",
+        });
+      }
+
+      const accessToken = authorization.slice(7).trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(accessToken);
+
+      if (authError || !userData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired login session.",
+        });
+      }
+
+      const buyer = userData.user;
+
+      // ------------------------------------------------------
+      // 2. VALIDATE ORDER ID
+      // ------------------------------------------------------
+
+      const orderId = String(req.params.orderId || "").trim();
+
+      const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+      if (!uuidPattern.test(orderId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid marketplace order ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. READ ORDER
+      // ------------------------------------------------------
+
+      const {
+        data: order,
+        error: orderError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .select(`
+          id,
+          order_number,
+          buyer_id,
+          seller_id,
+          total_amount,
+          currency,
+          payment_status,
+          order_status
+        `)
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderError) {
+        console.error(
+          "MARKETPLACE ORDER LOOKUP ERROR:",
+          orderError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not retrieve marketplace order.",
+        });
+      }
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Marketplace order not found.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 4. VERIFY BUYER OWNERSHIP
+      // ------------------------------------------------------
+
+      if (order.buyer_id !== buyer.id) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to submit payment for this order.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. PREVENT REPEATED DECLARATIONS
+      // ------------------------------------------------------
+
+      if (order.payment_status === "buyer_declared") {
+        return res.json({
+          success: true,
+          duplicate: true,
+          message: "You have already declared payment for this order.",
+          order_id: order.id,
+          payment_status: order.payment_status,
+        });
+      }
+
+      if (order.payment_status !== "awaiting_payment") {
+        return res.status(400).json({
+          success: false,
+          error: "This order is not awaiting payment declaration.",
+          payment_status: order.payment_status,
+        });
+      }
+
+      if (order.order_status !== "pending_payment") {
+        return res.status(400).json({
+          success: false,
+          error: "This order is not awaiting payment.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. VALIDATE OPTIONAL PAYMENT DETAILS
+      // ------------------------------------------------------
+
+      const {
+        transaction_reference = null,
+        payment_note = null,
+      } = req.body || {};
+
+      const transactionReference =
+        transaction_reference === null
+          ? null
+          : String(transaction_reference).trim();
+
+      const paymentNote =
+        payment_note === null
+          ? null
+          : String(payment_note).trim();
+
+      if (
+        transactionReference &&
+        transactionReference.length > 150
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Transaction reference is too long.",
+        });
+      }
+
+      if (
+        paymentNote &&
+        paymentNote.length > 1000
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Payment note is too long.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 7. UPDATE ORDER ATOMICALLY
+      //
+      // Only the first valid declaration can update the order.
+      // ------------------------------------------------------
+
+      const declaredAt = new Date().toISOString();
+
+      const {
+        data: updatedOrder,
+        error: updateError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .update({
+          payment_status: "buyer_declared",
+          buyer_declared_at: declaredAt,
+          buyer_transaction_reference: transactionReference,
+          buyer_payment_note: paymentNote,
+        })
+        .eq("id", orderId)
+        .eq("buyer_id", buyer.id)
+        .eq("payment_status", "awaiting_payment")
+        .eq("order_status", "pending_payment")
+        .select("id,order_number,buyer_id,seller_id,total_amount,currency,payment_status")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error(
+          "MARKETPLACE PAYMENT DECLARATION UPDATE ERROR:",
+          updateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not submit payment declaration.",
+        });
+      }
+
+      if (!updatedOrder) {
+        return res.status(409).json({
+          success: false,
+          error: "This order has already been updated. Refresh and check its payment status.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 8. PREPARE NOTIFICATION DETAILS
+      // ------------------------------------------------------
+
+      const orderLabel =
+        `Order #${updatedOrder.order_number}`;
+
+      const amount =
+        `${updatedOrder.currency} ${Number(
+          updatedOrder.total_amount
+        ).toFixed(2)}`;
+
+      const notificationTitle =
+        "Buyer Has Declared Payment";
+
+      const notificationBody =
+        `A buyer has declared payment for ${orderLabel}. Amount: ${amount}. Please verify your MoMo account.`;
+
+      const notificationData = {
+        type: "marketplace_payment_declared",
+        scope: "marketplace",
+        order_id: updatedOrder.id,
+        order_number: updatedOrder.order_number,
+        buyer_id: buyer.id,
+        seller_id: updatedOrder.seller_id,
+        payment_status: "buyer_declared",
+        url: "/seller/orders",
+      };
+
+      // ------------------------------------------------------
+      // 9. CREATE SELLER IN-APP NOTIFICATION
+      // ------------------------------------------------------
+
+      const sellerNotificationResult =
+        await supabaseAdmin
+          .from("notifications")
+          .insert({
+            user_id: updatedOrder.seller_id,
+            sender_id: buyer.id,
+            type: "marketplace_payment_declared",
+            title: notificationTitle,
+            body: notificationBody,
+            message: notificationBody,
+            ref_id: updatedOrder.id,
+            is_read: false,
+            data: notificationData,
+          })
+          .select("id")
+          .maybeSingle();
+
+      if (sellerNotificationResult.error) {
+        console.error(
+          "SELLER MARKETPLACE IN-APP NOTIFICATION ERROR:",
+          sellerNotificationResult.error
+        );
+      }
+
+      // ------------------------------------------------------
+      // 10. SEND SELLER AND ADMIN NOTIFICATIONS
+      // ------------------------------------------------------
+
+      const notificationTasks = [];
+
+      // Seller Android push
+      notificationTasks.push(
+        notifyUser(
+          updatedOrder.seller_id,
+          notificationTitle,
+          notificationBody,
+          notificationData
+        )
+      );
+
+      // Seller browser push
+      notificationTasks.push(
+        sendBrowserPushToUser(
+          updatedOrder.seller_id,
+          notificationTitle,
+          notificationBody,
+          "/seller/orders",
+          {
+            tag: `nasara-marketplace-order-${updatedOrder.id}`,
+            type: "marketplace_payment_declared",
+            extraData: notificationData,
+          }
+        )
+      );
+
+      // ------------------------------------------------------
+      // 11. NOTIFY NASARA ADMIN
+      //
+      // Existing helper sends:
+      // In-app + Android + Browser notifications.
+      // ------------------------------------------------------
+
+      const adminNotificationTask =
+        createNasaraAdminNotification({
+          type: "marketplace_payment_declared",
+          title: "New Marketplace Payment Declaration",
+          body:
+            `A buyer has declared payment for ${orderLabel}. ` +
+            `Amount: ${amount}. Seller confirmation is required.`,
+          ref_id: updatedOrder.id,
+          sender_id: buyer.id,
+          priority: "high",
+          data: {
+            scope: "admin",
+            event_type: "marketplace_payment_declared",
+            url: "/admin/notifications",
+            order_id: updatedOrder.id,
+            order_number: updatedOrder.order_number,
+            buyer_id: buyer.id,
+            seller_id: updatedOrder.seller_id,
+            payment_status: "buyer_declared",
+            table: "nasara_marketplace_orders",
+          },
+        });
+
+      notificationTasks.push(adminNotificationTask);
+
+      // ------------------------------------------------------
+      // 12. WAIT FOR NOTIFICATION ATTEMPTS
+      //
+      // Notification failure does not undo a valid declaration.
+      // ------------------------------------------------------
+
+      const notificationResults =
+        await Promise.allSettled(notificationTasks);
+
+      notificationResults.forEach((result, index) => {
+        if (result.status === "rejected") {
+          console.error(
+            "MARKETPLACE NOTIFICATION TASK FAILED:",
+            index,
+            result.reason
+          );
+        }
+      });
+
+      const sellerInAppSaved =
+        !sellerNotificationResult.error;
+
+      const sellerAndroid =
+        notificationResults[0];
+
+      const sellerBrowser =
+        notificationResults[1];
+
+      const adminNotification =
+        notificationResults[2];
+
+      // ------------------------------------------------------
+      // 13. RETURN SUCCESS
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+
+        message:
+          "Payment declaration submitted. The seller and Nasara administrators have been notified.",
+
+        order: {
+          id: updatedOrder.id,
+          order_number: updatedOrder.order_number,
+          payment_status: updatedOrder.payment_status,
+        },
+
+        notifications: {
+          seller: {
+            in_app: sellerInAppSaved,
+            android:
+              sellerAndroid.status === "fulfilled",
+            browser:
+              sellerBrowser.status === "fulfilled",
+          },
+
+          admin:
+            adminNotification.status === "fulfilled",
+        },
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA MARKETPLACE PAYMENT DECLARATION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          "Could not submit marketplace payment declaration.",
+      });
+    }
+  }
+);
+
+// ============================================================
+// NASARA MARKETPLACE
+// SELLER PAYMENT CONFIRMATION / REJECTION
+//
+// POST /marketplace/orders/:orderId/payment-decision
+//
+// Body:
+// { "decision": "confirmed" }
+// OR
+// { "decision": "rejected", "rejection_reason": "..." }
+//
+// Confirmation automatically creates the 5% commission.
+// Buyer and Nasara Admin are notified.
+// ============================================================
+
+app.post(
+  "/marketplace/orders/:orderId/payment-decision",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE SELLER
+      // ------------------------------------------------------
+
+      const authorization = req.headers.authorization || "";
+
+      if (!authorization.startsWith("Bearer ")) {
+        return res.status(401).json({
+          success: false,
+          error: "Login required.",
+        });
+      }
+
+      const accessToken = authorization.slice(7).trim();
+
+      const {
+        data: userData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(accessToken);
+
+      if (authError || !userData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired login session.",
+        });
+      }
+
+      const seller = userData.user;
+
+      // ------------------------------------------------------
+      // 2. VALIDATE ORDER ID
+      // ------------------------------------------------------
+
+      const orderId = String(req.params.orderId || "").trim();
+
+      const uuidPattern =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+      if (!uuidPattern.test(orderId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid marketplace order ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. VALIDATE DECISION
+      // ------------------------------------------------------
+
+      const {
+        decision,
+        rejection_reason = null,
+      } = req.body || {};
+
+      if (!["confirmed", "rejected"].includes(decision)) {
+        return res.status(400).json({
+          success: false,
+          error: "Decision must be confirmed or rejected.",
+        });
+      }
+
+      const rejectionReason =
+        rejection_reason === null
+          ? null
+          : String(rejection_reason).trim();
+
+      if (decision === "rejected") {
+        if (
+          !rejectionReason ||
+          rejectionReason.length > 500
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Please provide a rejection reason of no more than 500 characters.",
+          });
+        }
+      }
+
+      // ------------------------------------------------------
+      // 4. VERIFY SELLER OWNS THE ORDER
+      // ------------------------------------------------------
+
+      const {
+        data: existingOrder,
+        error: orderError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .select("id,seller_id,buyer_id,payment_status")
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderError) {
+        console.error(
+          "MARKETPLACE SELLER ORDER LOOKUP ERROR:",
+          orderError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not retrieve order.",
+        });
+      }
+
+      if (!existingOrder) {
+        return res.status(404).json({
+          success: false,
+          error: "Marketplace order not found.",
+        });
+      }
+
+      if (existingOrder.seller_id !== seller.id) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to manage this order.",
+        });
+      }
+
+      if (existingOrder.payment_status !== "buyer_declared") {
+        return res.status(409).json({
+          success: false,
+          error: "This payment is not awaiting seller confirmation.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. ATOMIC DATABASE DECISION
+      //
+      // The SQL function locks the order, changes its status
+      // and creates the commission in one transaction.
+      // ------------------------------------------------------
+
+      const {
+        data: decisionResult,
+        error: decisionError,
+      } = await supabaseAdmin.rpc(
+        "nasara_marketplace_seller_payment_decision",
+        {
+          p_order_id: orderId,
+          p_seller_id: seller.id,
+          p_decision: decision,
+          p_rejection_reason: rejectionReason,
+        }
+      );
+
+      if (decisionError) {
+        console.error(
+          "MARKETPLACE SELLER PAYMENT DECISION ERROR:",
+          decisionError
+        );
+
+        const errorMessage = decisionError.message || "";
+
+        if (
+          errorMessage.includes("NOT_ORDER_SELLER")
+        ) {
+          return res.status(403).json({
+            success: false,
+            error: "You are not authorized to manage this order.",
+          });
+        }
+
+        if (
+          errorMessage.includes("ORDER_NOT_FOUND") ||
+          errorMessage.includes("PAYMENT_NOT_AWAITING_SELLER_DECISION")
+        ) {
+          return res.status(409).json({
+            success: false,
+            error: "The order has changed or is no longer awaiting your decision.",
+          });
+        }
+
+        if (
+          errorMessage.includes("REJECTION_REASON_REQUIRED") ||
+          errorMessage.includes("INVALID_DECISION")
+        ) {
+          return res.status(400).json({
+            success: false,
+            error: "Invalid payment decision.",
+          });
+        }
+
+        return res.status(500).json({
+          success: false,
+          error: "Could not process seller payment decision.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. PREPARE NOTIFICATIONS
+      // ------------------------------------------------------
+
+      const result = decisionResult;
+
+      const orderLabel = `Order #${result.order_number}`;
+
+      const isConfirmed = decision === "confirmed";
+
+      const title = isConfirmed
+        ? "Payment Confirmed"
+        : "Payment Declaration Rejected";
+
+      const body = isConfirmed
+        ? `The seller has confirmed receipt of your payment for ${orderLabel}. Your order is now being processed.`
+        : `The seller could not verify your payment for ${orderLabel}. Reason: ${rejectionReason}`;
+
+      const notificationData = {
+        type: isConfirmed
+          ? "marketplace_payment_confirmed"
+          : "marketplace_payment_rejected",
+
+        scope: "marketplace",
+        order_id: result.order_id,
+        order_number: result.order_number,
+        buyer_id: result.buyer_id,
+        seller_id: result.seller_id,
+        payment_status: result.payment_status,
+        order_status: result.order_status,
+        url: "/",
+      };
+
+      // ------------------------------------------------------
+      // 7. CREATE BUYER IN-APP NOTIFICATION
+      // ------------------------------------------------------
+
+      const buyerInAppTask = supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: result.buyer_id,
+          sender_id: seller.id,
+          type: notificationData.type,
+          title,
+          body,
+          message: body,
+          ref_id: result.order_id,
+          is_read: false,
+          data: notificationData,
+        });
+
+      // ------------------------------------------------------
+      // 8. SEND BUYER ANDROID + BROWSER PUSH
+      // ------------------------------------------------------
+
+      const buyerAndroidTask = notifyUser(
+        result.buyer_id,
+        title,
+        body,
+        notificationData
+      );
+
+      const buyerBrowserTask = sendBrowserPushToUser(
+        result.buyer_id,
+        title,
+        body,
+        "/",
+        {
+          tag: `nasara-marketplace-decision-${result.order_id}`,
+          type: notificationData.type,
+          extraData: notificationData,
+        }
+      );
+
+      // ------------------------------------------------------
+      // 9. NOTIFY NASARA ADMIN
+      // ------------------------------------------------------
+
+      const adminTitle = isConfirmed
+        ? "Marketplace Payment Confirmed by Seller"
+        : "Marketplace Payment Rejected by Seller";
+
+      const adminBody = isConfirmed
+        ? `${orderLabel} payment has been confirmed by the seller. A 5% commission has been recorded.`
+        : `${orderLabel} payment declaration was rejected by the seller. Reason: ${rejectionReason}`;
+
+      const adminTask = createNasaraAdminNotification({
+        type: notificationData.type,
+        title: adminTitle,
+        body: adminBody,
+        ref_id: result.order_id,
+        sender_id: seller.id,
+        priority: "high",
+        data: {
+          scope: "admin",
+          url: "/admin/notifications",
+          event_type: notificationData.type,
+          order_id: result.order_id,
+          order_number: result.order_number,
+          buyer_id: result.buyer_id,
+          seller_id: result.seller_id,
+          payment_status: result.payment_status,
+          commission_amount: result.commission_amount,
+          currency: result.currency,
+          table: "nasara_marketplace_orders",
+        },
+      });
+
+      // ------------------------------------------------------
+      // 10. WAIT FOR NOTIFICATION ATTEMPTS
+      // ------------------------------------------------------
+
+      const notificationResults = await Promise.allSettled([
+        buyerInAppTask,
+        buyerAndroidTask,
+        buyerBrowserTask,
+        adminTask,
+      ]);
+
+      notificationResults.forEach((task, index) => {
+        if (task.status === "rejected") {
+          console.error(
+            "MARKETPLACE DECISION NOTIFICATION FAILED:",
+            index,
+            task.reason
+          );
+        }
+      });
+
+      if (
+        notificationResults[0].status === "fulfilled" &&
+        notificationResults[0].value?.error
+      ) {
+        console.error(
+          "BUYER IN-APP NOTIFICATION INSERT ERROR:",
+          notificationResults[0].value.error
+        );
+      }
+
+      // ------------------------------------------------------
+      // 11. RETURN RESULT
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+
+        message: isConfirmed
+          ? "Payment confirmed. The order is processing and the 5% commission has been recorded."
+          : "Payment declaration rejected. The buyer has been notified.",
+
+        order: {
+          id: result.order_id,
+          order_number: result.order_number,
+          payment_status: result.payment_status,
+          order_status: result.order_status,
+        },
+
+        commission: isConfirmed
+          ? {
+              amount: result.commission_amount,
+              currency: result.currency,
+              payment_status: "pending",
+            }
+          : null,
+
+        notifications: {
+          buyer_in_app:
+            notificationResults[0].status === "fulfilled" &&
+            !notificationResults[0].value?.error,
+
+          buyer_android:
+            notificationResults[1].status === "fulfilled",
+
+          buyer_browser:
+            notificationResults[2].status === "fulfilled",
+
+          admin:
+            notificationResults[3].status === "fulfilled",
+        },
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA MARKETPLACE SELLER DECISION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          error.message ||
+          "Could not process payment decision.",
+      });
+    }
+  }
+);
+// ============================================================
+// NASARA MARKETPLACE: CREATE ORDERS
+// POST /marketplace/orders/create
+//
+// Creates one order per seller.
+// Retrieves product prices and seller details from Supabase.
+// Saves order items and notifies sellers + Nasara Admin.
+// ============================================================
+
+app.post("/marketplace/orders/create", async (req, res) => {
+  const createdOrderIds = [];
+
+  try {
+    // --------------------------------------------------------
+    // 1. AUTHENTICATE BUYER
+    // --------------------------------------------------------
+
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : null;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        error: "Authentication required.",
+      });
+    }
+
+    const {
+      data: authData,
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !authData?.user) {
+      return res.status(401).json({
+        success: false,
+        error: "Invalid or expired session.",
+      });
+    }
+
+    const buyerId = authData.user.id;
+
+    // --------------------------------------------------------
+    // 2. VALIDATE REQUEST
+    // --------------------------------------------------------
+
+    const {
+      items,
+      delivery_address,
+      delivery_location,
+      buyer_phone,
+    } = req.body || {};
+
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Your cart is empty.",
+      });
+    }
+
+    if (items.length > 100) {
+      return res.status(400).json({
+        success: false,
+        error: "Too many products in one checkout.",
+      });
+    }
+
+    // Combine duplicate product IDs.
+    const quantities = new Map();
+
+    for (const item of items) {
+      const productId = String(item.product_id || "").trim();
+      const quantity = Number(item.quantity);
+
+      if (!productId) {
+        return res.status(400).json({
+          success: false,
+          error: "A cart item is missing its product ID.",
+        });
+      }
+
+      if (
+        !Number.isInteger(quantity) ||
+        quantity < 1 ||
+        quantity > 99
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid product quantity.",
+        });
+      }
+
+      const newQuantity =
+        (quantities.get(productId) || 0) + quantity;
+
+      if (newQuantity > 99) {
+        return res.status(400).json({
+          success: false,
+          error: "Maximum quantity per product is 99.",
+        });
+      }
+
+      quantities.set(productId, newQuantity);
+    }
+
+    const productIds = Array.from(quantities.keys());
+
+    // --------------------------------------------------------
+    // 3. FETCH AUTHORITATIVE PRODUCT INFORMATION
+    // Never trust prices or seller IDs supplied by the app.
+    // --------------------------------------------------------
+
+    const {
+      data: products,
+      error: productsError,
+    } = await supabaseAdmin
+      .from("items_live")
+      .select("id,title,price,seller_id,image_urls")
+      .in("id", productIds);
+
+    if (productsError) {
+      console.error("Marketplace product lookup:", productsError);
+
+      return res.status(500).json({
+        success: false,
+        error: "Unable to verify the products in your cart.",
+      });
+    }
+
+    if (!products || products.length !== productIds.length) {
+      return res.status(400).json({
+        success: false,
+        error: "One or more products are no longer available.",
+      });
+    }
+
+    // --------------------------------------------------------
+    // 4. GROUP PRODUCTS BY SELLER
+    // --------------------------------------------------------
+
+    const sellerGroups = new Map();
+
+    for (const product of products) {
+      if (!product.seller_id) {
+        return res.status(400).json({
+          success: false,
+          error: `Product "${product.title}" has no valid seller.`,
+        });
+      }
+
+      const price = Number(product.price);
+
+      if (!Number.isFinite(price) || price < 0) {
+        return res.status(400).json({
+          success: false,
+          error: `Product "${product.title}" has an invalid price.`,
+        });
+      }
+
+      const quantity = quantities.get(String(product.id));
+      const lineTotal = Math.round(price * quantity * 100) / 100;
+
+      if (!sellerGroups.has(product.seller_id)) {
+        sellerGroups.set(product.seller_id, {
+          seller_id: product.seller_id,
+          items: [],
+          subtotal: 0,
+        });
+      }
+
+      const group = sellerGroups.get(product.seller_id);
+
+      group.items.push({
+        product_id: String(product.id),
+        product_title: product.title || "Nasara product",
+        product_image: Array.isArray(product.image_urls)
+          ? product.image_urls[0] || null
+          : null,
+        quantity,
+        unit_price: price,
+        line_total: lineTotal,
+      });
+
+      group.subtotal =
+        Math.round((group.subtotal + lineTotal) * 100) / 100;
+    }
+
+    const sellerIds = Array.from(sellerGroups.keys());
+
+    // --------------------------------------------------------
+    // 5. FETCH SELLER PROFILES AND MOMO DETAILS
+    // --------------------------------------------------------
+
+    const {
+      data: sellers,
+      error: sellersError,
+    } = await supabaseAdmin
+      .from("profiles")
+      .select(
+        "id,momo_name,momo_number,business_name,full_name,username"
+      )
+      .in("id", sellerIds);
+
+    if (sellersError) {
+      console.error("Marketplace seller lookup:", sellersError);
+
+      return res.status(500).json({
+        success: false,
+        error: "Unable to retrieve seller payment details.",
+      });
+    }
+
+    const sellerMap = new Map(
+      (sellers || []).map((seller) => [seller.id, seller])
+    );
+
+    for (const sellerId of sellerIds) {
+      const seller = sellerMap.get(sellerId);
+
+      if (!seller) {
+        return res.status(400).json({
+          success: false,
+          error: "A seller profile could not be found.",
+        });
+      }
+
+      if (!seller.momo_number) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "A seller has not added a MoMo number. Please contact the seller before checkout.",
+        });
+      }
+    }
+
+    // --------------------------------------------------------
+    // 6. CREATE ONE ORDER PER SELLER
+    // --------------------------------------------------------
+
+    const createdOrders = [];
+
+    for (const sellerId of sellerIds) {
+      const group = sellerGroups.get(sellerId);
+      const seller = sellerMap.get(sellerId);
+
+      const sellerName =
+        seller.momo_name ||
+        seller.business_name ||
+        seller.full_name ||
+        seller.username ||
+        "Nasara Seller";
+
+      const { data: order, error: orderError } =
+        await supabaseAdmin
+          .from("nasara_marketplace_orders")
+          .insert({
+            buyer_id: buyerId,
+            seller_id: sellerId,
+            currency: "GHS",
+            subtotal: group.subtotal,
+            total_amount: group.subtotal,
+
+            seller_momo_name: sellerName,
+            seller_momo_number: seller.momo_number,
+
+            payment_status: "awaiting_payment",
+            order_status: "pending_payment",
+
+            delivery_address: delivery_address || null,
+            delivery_location: delivery_location || null,
+            buyer_phone: buyer_phone || null,
+          })
+          .select("*")
+          .single();
+
+      if (orderError || !order) {
+        console.error("Marketplace order creation:", orderError);
+        throw new Error("ORDER_CREATION_FAILED");
+      }
+
+      createdOrderIds.push(order.id);
+
+      const orderItems = group.items.map((item) => ({
+        ...item,
+        order_id: order.id,
+      }));
+
+      const {
+        error: itemsError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_order_items")
+        .insert(orderItems);
+
+      if (itemsError) {
+        console.error("Marketplace order items:", itemsError);
+        throw new Error("ORDER_ITEMS_CREATION_FAILED");
+      }
+
+      createdOrders.push({
+        ...order,
+        seller_name: sellerName,
+        item_count: group.items.length,
+        items: group.items,
+      });
+    }
+
+    // --------------------------------------------------------
+    // 7. NOTIFY EACH SELLER
+    // --------------------------------------------------------
+
+    const notificationTasks = [];
+
+    for (const order of createdOrders) {
+      const sellerMessage =
+        `You have received a new Nasara order #${order.order_number}. ` +
+        `Order amount: GH₵${Number(order.total_amount).toFixed(2)}.`;
+
+      notificationTasks.push(
+        (async () => {
+          const { error } = await supabaseAdmin
+            .from("notifications")
+            .insert({
+              user_id: order.seller_id,
+              sender_id: buyerId,
+              type: "marketplace_new_order",
+              title: "New Marketplace Order",
+              body: sellerMessage,
+              message: sellerMessage,
+              ref_id: String(order.id),
+              is_read: false,
+              data: {
+                scope: "seller",
+                type: "marketplace_new_order",
+                order_id: order.id,
+                order_number: order.order_number,
+                url: "/seller/orders",
+              },
+            });
+
+          if (error) {
+            throw error;
+          }
+        })()
+      );
+
+      notificationTasks.push(
+        notifyUser(
+          order.seller_id,
+          "New Marketplace Order",
+          sellerMessage,
+          {
+            type: "marketplace_new_order",
+            order_id: order.id,
+            order_number: order.order_number,
+            url: "/seller/orders",
+          }
+        )
+      );
+
+      notificationTasks.push(
+        sendBrowserPushToUser(
+          order.seller_id,
+          "New Marketplace Order",
+          sellerMessage,
+          "/seller/orders",
+          {
+            tag: `marketplace-order-${order.id}`,
+            type: "marketplace_new_order",
+            extraData: {
+              order_id: order.id,
+              order_number: order.order_number,
+            },
+          }
+        )
+      );
+
+      notificationTasks.push(
+        createNasaraAdminNotification({
+          type: "marketplace_new_order",
+          title: "New Marketplace Order",
+          body:
+            `A buyer placed order #${order.order_number}. ` +
+            `Seller: ${order.seller_name}. ` +
+            `Amount: GH₵${Number(order.total_amount).toFixed(2)}.`,
+          ref_id: order.id,
+          sender_id: buyerId,
+          priority: "normal",
+          data: {
+            order_id: order.id,
+            order_number: order.order_number,
+            seller_id: order.seller_id,
+            buyer_id: buyerId,
+            url: "/admin/notifications",
+          },
+        })
+      );
+    }
+
+    const notificationResults =
+      await Promise.allSettled(notificationTasks);
+
+    // --------------------------------------------------------
+    // 8. RETURN CREATED ORDERS
+    // --------------------------------------------------------
+
+    return res.status(201).json({
+      success: true,
+      message: "Your marketplace orders have been created.",
+      orders: createdOrders.map((order) => ({
+        id: order.id,
+        order_number: order.order_number,
+        seller_id: order.seller_id,
+        seller_name: order.seller_name,
+        subtotal: order.subtotal,
+        total_amount: order.total_amount,
+        currency: order.currency,
+        payment_status: order.payment_status,
+        order_status: order.order_status,
+        item_count: order.item_count,
+      })),
+      total_orders: createdOrders.length,
+      notifications_attempted: notificationResults.length,
+    });
+
+  } catch (error) {
+    console.error("NASARA MARKETPLACE ORDER ERROR:", error);
+
+    // Compensating cleanup: remove any orders created by this
+    // request if a later order or item insert failed.
+    if (createdOrderIds.length > 0) {
+      const { error: cleanupError } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .delete()
+        .in("id", createdOrderIds);
+
+      if (cleanupError) {
+        console.error(
+          "Marketplace order cleanup failed:",
+          cleanupError
+        );
+      }
+    }
+
+    return res.status(500).json({
+      success: false,
+      error:
+        error.message === "ORDER_CREATION_FAILED" ||
+        error.message === "ORDER_ITEMS_CREATION_FAILED"
+          ? "We could not complete your checkout. Please try again."
+          : "An unexpected error occurred while creating your orders.",
+    });
+  }
+});
+
+// ============================================================
+// NASARA MARKETPLACE: SELLER COMMISSION PAYMENT SUBMISSION
+// POST /marketplace/commissions/:commissionId/payment-submit
+//
+// Seller submits MoMo transaction reference after paying
+// Nasara's 5% marketplace commission.
+//
+// Admin receives:
+// - In-app notification
+// - Android push notification
+// - Browser push notification
+// ============================================================
+
+app.post(
+  "/marketplace/commissions/:commissionId/payment-submit",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE SELLER
+      // ------------------------------------------------------
+
+      const authHeader = req.headers.authorization || "";
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const sellerId = authData.user.id;
+      const commissionId = req.params.commissionId;
+
+      // ------------------------------------------------------
+      // 2. VALIDATE COMMISSION ID
+      // ------------------------------------------------------
+
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(commissionId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid commission ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. VALIDATE PAYMENT REFERENCE
+      // ------------------------------------------------------
+
+      const transactionReference = String(
+        req.body?.transaction_reference || ""
+      ).trim();
+
+      if (
+        transactionReference.length < 4 ||
+        transactionReference.length > 120
+      ) {
+        return res.status(400).json({
+          success: false,
+          error: "Enter a valid MoMo transaction reference.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 4. FETCH COMMISSION
+      // ------------------------------------------------------
+
+      const {
+        data: commission,
+        error: commissionError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_commissions")
+        .select(`
+          id,
+          order_id,
+          seller_id,
+          currency,
+          commission_rate,
+          order_subtotal,
+          commission_amount,
+          payment_status
+        `)
+        .eq("id", commissionId)
+        .maybeSingle();
+
+      if (commissionError) {
+        console.error(
+          "Commission lookup error:",
+          commissionError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to retrieve commission details.",
+        });
+      }
+
+      if (!commission) {
+        return res.status(404).json({
+          success: false,
+          error: "Commission record not found.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. VERIFY SELLER OWNERSHIP
+      // ------------------------------------------------------
+
+      if (commission.seller_id !== sellerId) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to submit this payment.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. CHECK COMMISSION PAYMENT STATUS
+      //
+      // Allow a seller to resubmit after an admin rejection.
+      // ------------------------------------------------------
+
+      if (
+        !["pending", "rejected"].includes(
+          commission.payment_status
+        )
+      ) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This commission cannot be submitted in its current status.",
+          payment_status: commission.payment_status,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 7. UPDATE COMMISSION
+      //
+      // Conditional update prevents duplicate submissions
+      // from overwriting an already submitted payment.
+      // ------------------------------------------------------
+
+      const {
+        data: updatedCommission,
+        error: updateError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_commissions")
+        .update({
+          payment_status: "seller_submitted",
+          seller_payment_reference: transactionReference,
+          seller_submitted_at: new Date().toISOString(),
+
+          // Reset previous admin decision when resubmitting.
+          admin_verified_by: null,
+          admin_verified_at: null,
+          admin_notes: null,
+        })
+        .eq("id", commissionId)
+        .eq("seller_id", sellerId)
+        .in("payment_status", ["pending", "rejected"])
+        .select("*")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error(
+          "Commission submission update error:",
+          updateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to submit your commission payment.",
+        });
+      }
+
+      if (!updatedCommission) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This commission has already been submitted or its status has changed. Refresh and try again.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 8. GET SELLER NAME
+      // ------------------------------------------------------
+
+      const {
+        data: sellerProfile,
+      } = await supabaseAdmin
+        .from("profiles")
+        .select("full_name,business_name,username")
+        .eq("id", sellerId)
+        .maybeSingle();
+
+      const sellerName =
+        sellerProfile?.business_name ||
+        sellerProfile?.full_name ||
+        sellerProfile?.username ||
+        "Nasara Seller";
+
+      const commissionAmount = Number(
+        updatedCommission.commission_amount
+      ).toFixed(2);
+
+      const currency = updatedCommission.currency || "GHS";
+
+      // ------------------------------------------------------
+      // 9. NOTIFY NASARA ADMIN
+      //
+      // Existing helper sends:
+      // - In-app notifications
+      // - Android push
+      // - Browser push
+      // ------------------------------------------------------
+
+      const adminNotification =
+        createNasaraAdminNotification({
+          type: "marketplace_commission_submitted",
+          title: "Marketplace Commission Payment Submitted",
+          body:
+            `${sellerName} submitted a commission payment ` +
+            `of ${currency} ${commissionAmount} for order ` +
+            `#${updatedCommission.order_id}. ` +
+            `Transaction reference: ${transactionReference}. ` +
+            `Admin verification is required.`,
+          ref_id: updatedCommission.id,
+          sender_id: sellerId,
+          priority: "high",
+          data: {
+            commission_id: updatedCommission.id,
+            order_id: updatedCommission.order_id,
+            seller_id: sellerId,
+            seller_name: sellerName,
+            commission_amount: updatedCommission.commission_amount,
+            currency,
+            transaction_reference: transactionReference,
+            payment_status: "seller_submitted",
+            url: "/admin/notifications",
+          },
+        });
+
+      const notificationResult =
+        await Promise.allSettled([adminNotification]);
+
+      // ------------------------------------------------------
+      // 10. RESPONSE
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Your commission payment reference has been submitted. Nasara Admin will verify your payment.",
+        commission: {
+          id: updatedCommission.id,
+          order_id: updatedCommission.order_id,
+          amount: updatedCommission.commission_amount,
+          currency,
+          payment_status: updatedCommission.payment_status,
+          seller_payment_reference:
+            updatedCommission.seller_payment_reference,
+          seller_submitted_at:
+            updatedCommission.seller_submitted_at,
+        },
+        admin_notification:
+          notificationResult[0].status === "fulfilled"
+            ? "notification_helper_completed"
+            : "notification_helper_failed",
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA COMMISSION SUBMISSION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "An unexpected error occurred while submitting your commission payment.",
+      });
+    }
+  }
+);
+
+// ============================================================
+// NASARA MARKETPLACE: ADMIN COMMISSION VERIFICATION
+// POST /marketplace/commissions/:commissionId/admin-decision
+//
+// Admin approves or rejects seller commission payment.
+// Seller receives all three notification types.
+// ============================================================
+
+app.post(
+  "/marketplace/commissions/:commissionId/admin-decision",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE ADMIN
+      // ------------------------------------------------------
+
+      const authHeader = req.headers.authorization || "";
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const adminId = authData.user.id;
+
+      // ------------------------------------------------------
+      // 2. VERIFY ADMIN MEMBERSHIP
+      // ------------------------------------------------------
+
+      const {
+        data: adminRecord,
+        error: adminError,
+      } = await supabaseAdmin
+        .from("admins")
+        .select("user_id")
+        .eq("user_id", adminId)
+        .maybeSingle();
+
+      if (adminError) {
+        console.error("Admin verification error:", adminError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to verify admin permissions.",
+        });
+      }
+
+      if (!adminRecord) {
+        return res.status(403).json({
+          success: false,
+          error: "Admin access required.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. VALIDATE COMMISSION ID
+      // ------------------------------------------------------
+
+      const commissionId = req.params.commissionId;
+
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(commissionId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid commission ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 4. VALIDATE ADMIN DECISION
+      // ------------------------------------------------------
+
+      const decision = String(
+        req.body?.decision || ""
+      ).trim().toLowerCase();
+
+      const adminNotes = String(
+        req.body?.admin_notes || ""
+      ).trim();
+
+      if (!["approved", "rejected"].includes(decision)) {
+        return res.status(400).json({
+          success: false,
+          error: "Decision must be approved or rejected.",
+        });
+      }
+
+      if (decision === "rejected" && !adminNotes) {
+        return res.status(400).json({
+          success: false,
+          error: "Please provide a reason for rejecting the payment.",
+        });
+      }
+
+      if (adminNotes.length > 500) {
+        return res.status(400).json({
+          success: false,
+          error: "Admin notes cannot exceed 500 characters.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. FETCH COMMISSION
+      // ------------------------------------------------------
+
+      const {
+        data: commission,
+        error: commissionError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_commissions")
+        .select("*")
+        .eq("id", commissionId)
+        .maybeSingle();
+
+      if (commissionError) {
+        console.error(
+          "Commission lookup error:",
+          commissionError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to retrieve commission record.",
+        });
+      }
+
+      if (!commission) {
+        return res.status(404).json({
+          success: false,
+          error: "Commission record not found.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. ONLY VERIFY SUBMITTED PAYMENTS
+      // ------------------------------------------------------
+
+      if (commission.payment_status !== "seller_submitted") {
+        return res.status(409).json({
+          success: false,
+          error:
+            "Only submitted commission payments can be verified.",
+          current_status: commission.payment_status,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 7. UPDATE COMMISSION
+      //
+      // Conditional update prevents two admins from processing
+      // the same submitted commission simultaneously.
+      // ------------------------------------------------------
+
+      const newStatus =
+        decision === "approved"
+          ? "admin_approved"
+          : "rejected";
+
+      const {
+        data: updatedCommission,
+        error: updateError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_commissions")
+        .update({
+          payment_status: newStatus,
+          admin_verified_by: adminId,
+          admin_verified_at: new Date().toISOString(),
+          admin_notes: adminNotes || null,
+        })
+        .eq("id", commissionId)
+        .eq("payment_status", "seller_submitted")
+        .select("*")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error(
+          "Commission verification update error:",
+          updateError
+        );
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to update commission verification.",
+        });
+      }
+
+      if (!updatedCommission) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "Another admin may have already processed this payment. Refresh and check the commission status.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 8. PREPARE SELLER NOTIFICATION
+      // ------------------------------------------------------
+
+      const approved = decision === "approved";
+
+      const title = approved
+        ? "Nasara Commission Payment Approved"
+        : "Nasara Commission Payment Rejected";
+
+      const body = approved
+        ? `Your commission payment of ${updatedCommission.currency} ${Number(
+            updatedCommission.commission_amount
+          ).toFixed(2)} for order ${updatedCommission.order_id} has been verified and approved by Nasara Admin.`
+        : `Your commission payment for order ${updatedCommission.order_id} was not approved. Reason: ${adminNotes}`;
+
+      const notificationData = {
+        scope: "seller",
+        type: "marketplace_commission_decision",
+        commission_id: updatedCommission.id,
+        order_id: updatedCommission.order_id,
+        payment_status: updatedCommission.payment_status,
+        decision,
+        admin_notes: adminNotes || null,
+        url: "/seller/orders",
+      };
+
+      // ------------------------------------------------------
+      // 9. SAVE IN-APP NOTIFICATION
+      // ------------------------------------------------------
+
+      const {
+        error: notificationError,
+      } = await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: updatedCommission.seller_id,
+          sender_id: adminId,
+          type: "marketplace_commission_decision",
+          title,
+          body,
+          message: body,
+          ref_id: String(updatedCommission.id),
+          is_read: false,
+          data: notificationData,
+        });
+
+      if (notificationError) {
+        console.error(
+          "Seller in-app notification error:",
+          notificationError
+        );
+      }
+
+      // ------------------------------------------------------
+      // 10. SEND ANDROID + BROWSER PUSH
+      // ------------------------------------------------------
+
+      const pushResults = await Promise.allSettled([
+        notifyUser(
+          updatedCommission.seller_id,
+          title,
+          body,
+          notificationData
+        ),
+
+        sendBrowserPushToUser(
+          updatedCommission.seller_id,
+          title,
+          body,
+          "/seller/orders",
+          {
+            tag: `marketplace-commission-${updatedCommission.id}`,
+            type: "marketplace_commission_decision",
+            extraData: notificationData,
+          }
+        ),
+      ]);
+
+      // ------------------------------------------------------
+      // 11. RESPONSE
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+        message: approved
+          ? "Commission payment approved successfully."
+          : "Commission payment rejected.",
+        commission: {
+          id: updatedCommission.id,
+          order_id: updatedCommission.order_id,
+          seller_id: updatedCommission.seller_id,
+          commission_amount: updatedCommission.commission_amount,
+          currency: updatedCommission.currency,
+          payment_status: updatedCommission.payment_status,
+          admin_verified_by: updatedCommission.admin_verified_by,
+          admin_verified_at: updatedCommission.admin_verified_at,
+          admin_notes: updatedCommission.admin_notes,
+        },
+        notifications: {
+          in_app:
+            notificationError ? "failed" : "saved",
+          android:
+            pushResults[0].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+          browser:
+            pushResults[1].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+        },
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA ADMIN COMMISSION VERIFICATION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "An unexpected error occurred while verifying commission payment.",
+      });
+    }
+  }
+);
+
+// ============================================================
+// NASARA MARKETPLACE: SELLER ORDER FULFILMENT
+// POST /marketplace/orders/:orderId/status
+//
+// Seller can:
+// - Mark order ready for dispatch
+// - Mark order dispatched
+//
+// Buyer receives in-app, Android and browser notifications.
+// Buyer confirmation will handle final completion.
+// ============================================================
+
+app.post(
+  "/marketplace/orders/:orderId/status",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE SELLER
+      // ------------------------------------------------------
+
+      const authHeader = req.headers.authorization || "";
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const sellerId = authData.user.id;
+      const orderId = req.params.orderId;
+
+      // ------------------------------------------------------
+      // 2. VALIDATE ORDER ID
+      // ------------------------------------------------------
+
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(orderId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid order ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. VALIDATE REQUESTED STATUS
+      // ------------------------------------------------------
+
+      const newStatus = String(
+        req.body?.status || ""
+      ).trim().toLowerCase();
+
+      const allowedTransitions = {
+        processing: "ready_for_dispatch",
+        ready_for_dispatch: "dispatched",
+      };
+
+      if (
+        !Object.values(allowedTransitions).includes(newStatus)
+      ) {
+        return res.status(400).json({
+          success: false,
+          error:
+            "Invalid status. Seller can mark an order ready_for_dispatch or dispatched.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 4. FETCH ORDER
+      // ------------------------------------------------------
+
+      const {
+        data: order,
+        error: orderError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .select(`
+          id,
+          order_number,
+          buyer_id,
+          seller_id,
+          total_amount,
+          currency,
+          payment_status,
+          order_status
+        `)
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderError) {
+        console.error("Order lookup error:", orderError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to retrieve order.",
+        });
+      }
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Order not found.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. VERIFY SELLER OWNERSHIP
+      // ------------------------------------------------------
+
+      if (order.seller_id !== sellerId) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to update this order.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. VERIFY BUYER PAYMENT
+      // ------------------------------------------------------
+
+      if (order.payment_status !== "seller_confirmed") {
+        return res.status(409).json({
+          success: false,
+          error:
+            "You must confirm the buyer's payment before fulfilling this order.",
+          payment_status: order.payment_status,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 7. VERIFY STATUS TRANSITION
+      // ------------------------------------------------------
+
+      const expectedPreviousStatus =
+        Object.keys(allowedTransitions).find(
+          (status) => allowedTransitions[status] === newStatus
+        );
+
+      if (order.order_status !== expectedPreviousStatus) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This order cannot move to the requested status from its current status.",
+          current_status: order.order_status,
+          requested_status: newStatus,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 8. UPDATE ORDER
+      //
+      // Conditional update prevents duplicate or conflicting
+      // status changes.
+      // ------------------------------------------------------
+
+      const {
+        data: updatedOrder,
+        error: updateError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .update({
+          order_status: newStatus,
+        })
+        .eq("id", orderId)
+        .eq("seller_id", sellerId)
+        .eq("payment_status", "seller_confirmed")
+        .eq("order_status", expectedPreviousStatus)
+        .select("*")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error("Order status update error:", updateError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to update order status.",
+        });
+      }
+
+      if (!updatedOrder) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "The order status has changed. Refresh and try again.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 9. PREPARE BUYER NOTIFICATION
+      // ------------------------------------------------------
+
+      const orderNumber = updatedOrder.order_number;
+
+      const notificationMessages = {
+        ready_for_dispatch: {
+          title: "Your Nasara Order Is Ready",
+          body:
+            `Your order #${orderNumber} has been prepared ` +
+            "by the seller and is ready for dispatch.",
+        },
+
+        dispatched: {
+          title: "Your Nasara Order Has Been Dispatched",
+          body:
+            `Your order #${orderNumber} has been marked as dispatched ` +
+            "by the seller.",
+        },
+      };
+
+      const notification =
+        notificationMessages[newStatus];
+
+      const notificationData = {
+        scope: "buyer",
+        type: "marketplace_order_status",
+        order_id: updatedOrder.id,
+        order_number: orderNumber,
+        seller_id: sellerId,
+        order_status: newStatus,
+        payment_status: updatedOrder.payment_status,
+        url: "/orders",
+      };
+
+      // ------------------------------------------------------
+      // 10. SAVE BUYER IN-APP NOTIFICATION
+      // ------------------------------------------------------
+
+      const {
+        error: notificationError,
+      } = await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: updatedOrder.buyer_id,
+          sender_id: sellerId,
+          type: "marketplace_order_status",
+          title: notification.title,
+          body: notification.body,
+          message: notification.body,
+          ref_id: String(updatedOrder.id),
+          is_read: false,
+          data: notificationData,
+        });
+
+      if (notificationError) {
+        console.error(
+          "Buyer in-app notification error:",
+          notificationError
+        );
+      }
+
+      // ------------------------------------------------------
+      // 11. SEND ANDROID + BROWSER PUSH
+      // ------------------------------------------------------
+
+      const pushResults = await Promise.allSettled([
+        notifyUser(
+          updatedOrder.buyer_id,
+          notification.title,
+          notification.body,
+          notificationData
+        ),
+
+        sendBrowserPushToUser(
+          updatedOrder.buyer_id,
+          notification.title,
+          notification.body,
+          "/orders",
+          {
+            tag: `marketplace-order-${updatedOrder.id}-${newStatus}`,
+            type: "marketplace_order_status",
+            extraData: notificationData,
+          }
+        ),
+      ]);
+
+      // ------------------------------------------------------
+      // 12. RETURN RESULT
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+        message: notification.body,
+        order: {
+          id: updatedOrder.id,
+          order_number: updatedOrder.order_number,
+          payment_status: updatedOrder.payment_status,
+          order_status: updatedOrder.order_status,
+        },
+        notifications: {
+          in_app: notificationError ? "failed" : "saved",
+          android:
+            pushResults[0].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+          browser:
+            pushResults[1].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+        },
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA SELLER ORDER FULFILMENT ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "An unexpected error occurred while updating the order.",
+      });
+    }
+  }
+);
+
+
+// ============================================================
+// NASARA MARKETPLACE: BUYER CONFIRMS ORDER RECEIPT
+// POST /marketplace/orders/:orderId/confirm-received
+//
+// Buyer confirms that the ordered products were received.
+//
+// Changes:
+// order_status: dispatched -> completed
+//
+// Notifications:
+// - Seller: in-app + Android + browser push
+// - Nasara Admin: in-app + Android + browser push
+// ============================================================
+
+app.post(
+  "/marketplace/orders/:orderId/confirm-received",
+  async (req, res) => {
+    try {
+      // ------------------------------------------------------
+      // 1. AUTHENTICATE BUYER
+      // ------------------------------------------------------
+
+      const authHeader = req.headers.authorization || "";
+      const token = authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7)
+        : null;
+
+      if (!token) {
+        return res.status(401).json({
+          success: false,
+          error: "Authentication required.",
+        });
+      }
+
+      const {
+        data: authData,
+        error: authError,
+      } = await supabaseAdmin.auth.getUser(token);
+
+      if (authError || !authData?.user) {
+        return res.status(401).json({
+          success: false,
+          error: "Invalid or expired session.",
+        });
+      }
+
+      const buyerId = authData.user.id;
+      const orderId = req.params.orderId;
+
+      // ------------------------------------------------------
+      // 2. VALIDATE ORDER ID
+      // ------------------------------------------------------
+
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+      if (!uuidRegex.test(orderId)) {
+        return res.status(400).json({
+          success: false,
+          error: "Invalid order ID.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 3. FETCH ORDER
+      // ------------------------------------------------------
+
+      const {
+        data: order,
+        error: orderError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .select(`
+          id,
+          order_number,
+          buyer_id,
+          seller_id,
+          total_amount,
+          currency,
+          payment_status,
+          order_status
+        `)
+        .eq("id", orderId)
+        .maybeSingle();
+
+      if (orderError) {
+        console.error("Order lookup error:", orderError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to retrieve order.",
+        });
+      }
+
+      if (!order) {
+        return res.status(404).json({
+          success: false,
+          error: "Order not found.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 4. VERIFY BUYER OWNERSHIP
+      // ------------------------------------------------------
+
+      if (order.buyer_id !== buyerId) {
+        return res.status(403).json({
+          success: false,
+          error: "You are not authorized to confirm this order.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 5. VERIFY PAYMENT
+      // ------------------------------------------------------
+
+      if (order.payment_status !== "seller_confirmed") {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This order cannot be completed because payment has not been confirmed by the seller.",
+          payment_status: order.payment_status,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 6. ONLY DISPATCHED ORDERS CAN BE COMPLETED
+      // ------------------------------------------------------
+
+      if (order.order_status !== "dispatched") {
+        return res.status(409).json({
+          success: false,
+          error:
+            "You can only confirm receipt after the seller has dispatched your order.",
+          current_status: order.order_status,
+        });
+      }
+
+      // ------------------------------------------------------
+      // 7. COMPLETE ORDER
+      //
+      // Conditional update prevents duplicate confirmation
+      // and conflicting status changes.
+      // ------------------------------------------------------
+
+      const {
+        data: completedOrder,
+        error: updateError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_orders")
+        .update({
+          order_status: "completed",
+        })
+        .eq("id", orderId)
+        .eq("buyer_id", buyerId)
+        .eq("payment_status", "seller_confirmed")
+        .eq("order_status", "dispatched")
+        .select("*")
+        .maybeSingle();
+
+      if (updateError) {
+        console.error("Order completion error:", updateError);
+
+        return res.status(500).json({
+          success: false,
+          error: "Unable to confirm order receipt.",
+        });
+      }
+
+      if (!completedOrder) {
+        return res.status(409).json({
+          success: false,
+          error:
+            "This order has already been updated. Refresh and check its status.",
+        });
+      }
+
+      // ------------------------------------------------------
+      // 8. PREPARE SELLER NOTIFICATION
+      // ------------------------------------------------------
+
+      const title = "Order Successfully Completed";
+
+      const body =
+        `The buyer has confirmed receiving order ` +
+        `#${completedOrder.order_number}. ` +
+        "Your Nasara order is now completed.";
+
+      const notificationData = {
+        scope: "seller",
+        type: "marketplace_order_completed",
+        order_id: completedOrder.id,
+        order_number: completedOrder.order_number,
+        buyer_id: buyerId,
+        seller_id: completedOrder.seller_id,
+        order_status: "completed",
+        payment_status: completedOrder.payment_status,
+        url: "/seller/orders",
+      };
+
+      // ------------------------------------------------------
+      // 9. SAVE SELLER IN-APP NOTIFICATION
+      // ------------------------------------------------------
+
+      const {
+        error: sellerNotificationError,
+      } = await supabaseAdmin
+        .from("notifications")
+        .insert({
+          user_id: completedOrder.seller_id,
+          sender_id: buyerId,
+          type: "marketplace_order_completed",
+          title,
+          body,
+          message: body,
+          ref_id: String(completedOrder.id),
+          is_read: false,
+          data: notificationData,
+        });
+
+      if (sellerNotificationError) {
+        console.error(
+          "Seller completion notification error:",
+          sellerNotificationError
+        );
+      }
+
+      // ------------------------------------------------------
+      // 10. SEND SELLER ANDROID + BROWSER PUSH
+      // ------------------------------------------------------
+
+      const sellerPushResults = await Promise.allSettled([
+        notifyUser(
+          completedOrder.seller_id,
+          title,
+          body,
+          notificationData
+        ),
+
+        sendBrowserPushToUser(
+          completedOrder.seller_id,
+          title,
+          body,
+          "/seller/orders",
+          {
+            tag: `marketplace-completed-${completedOrder.id}`,
+            type: "marketplace_order_completed",
+            extraData: notificationData,
+          }
+        ),
+      ]);
+
+      // ------------------------------------------------------
+      // 11. NOTIFY NASARA ADMIN
+      // ------------------------------------------------------
+
+      const adminNotification =
+        await Promise.allSettled([
+          createNasaraAdminNotification({
+            type: "marketplace_order_completed",
+            title: "Marketplace Order Completed",
+            body:
+              `Buyer confirmed receipt of order ` +
+              `#${completedOrder.order_number}. ` +
+              `Order value: ${completedOrder.currency} ` +
+              `${Number(completedOrder.total_amount).toFixed(2)}.`,
+            ref_id: completedOrder.id,
+            sender_id: buyerId,
+            priority: "normal",
+            data: {
+              order_id: completedOrder.id,
+              order_number: completedOrder.order_number,
+              buyer_id: buyerId,
+              seller_id: completedOrder.seller_id,
+              order_status: "completed",
+              url: "/admin/notifications",
+            },
+          }),
+        ]);
+
+      // ------------------------------------------------------
+      // 12. RETURN RESULT
+      // ------------------------------------------------------
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Thank you. You have confirmed receiving your order.",
+        order: {
+          id: completedOrder.id,
+          order_number: completedOrder.order_number,
+          payment_status: completedOrder.payment_status,
+          order_status: completedOrder.order_status,
+        },
+        notifications: {
+          seller_in_app: sellerNotificationError
+            ? "failed"
+            : "saved",
+          seller_android:
+            sellerPushResults[0].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+          seller_browser:
+            sellerPushResults[1].status === "fulfilled"
+              ? "attempted"
+              : "failed",
+          admin:
+            adminNotification[0].status === "fulfilled"
+              ? "notification_helper_completed"
+              : "notification_helper_failed",
+        },
+      });
+
+    } catch (error) {
+      console.error(
+        "NASARA BUYER ORDER COMPLETION ERROR:",
+        error
+      );
+
+      return res.status(500).json({
+        success: false,
+        error:
+          "An unexpected error occurred while confirming order receipt.",
+      });
+    }
+  }
+);
+
+// ============================================================
+// NASARA MARKETPLACE - GET BUYER / SELLER ORDERS
+// GET /marketplace/orders?role=buyer
+// GET /marketplace/orders?role=seller
+//
+// Buyers see their purchases.
+// Sellers see orders for their products.
+// Only sellers receive commission details.
+// ============================================================
+
+app.get("/marketplace/orders", async (req, res) => {
+  try {
+    // 1. Authenticate user
+    const authHeader = req.headers.authorization || "";
+    const token = authHeader.startsWith("Bearer ")
+      ? authHeader.slice(7)
+      : null;
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required.",
+      });
+    }
+
+    const {
+      data: { user },
+      error: authError,
+    } = await supabaseAdmin.auth.getUser(token);
+
+    if (authError || !user) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired session.",
+      });
+    }
+
+    // 2. Validate requested view
+    const role = String(req.query.role || "").toLowerCase();
+
+    if (!["buyer", "seller"].includes(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Role must be buyer or seller.",
+      });
+    }
+
+    // 3. Fetch only this user's orders
+    let ordersQuery = supabaseAdmin
+      .from("nasara_marketplace_orders")
+      .select("*")
+      .eq(role === "buyer" ? "buyer_id" : "seller_id", user.id)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    // Optional order status filter
+    if (req.query.status) {
+      ordersQuery = ordersQuery.eq(
+        "order_status",
+        String(req.query.status)
+      );
+    }
+
+    const { data: orders, error: ordersError } = await ordersQuery;
+
+    if (ordersError) {
+      console.error("Nasara orders fetch error:", ordersError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Could not retrieve orders.",
+      });
+    }
+
+    if (!orders || orders.length === 0) {
+      return res.json({
+        success: true,
+        role,
+        count: 0,
+        orders: [],
+      });
+    }
+
+    // 4. Fetch order items
+    const orderIds = orders.map((order) => order.id);
+
+    const {
+      data: orderItems,
+      error: itemsError,
+    } = await supabaseAdmin
+      .from("nasara_marketplace_order_items")
+      .select("*")
+      .in("order_id", orderIds);
+
+    if (itemsError) {
+      console.error("Nasara order items error:", itemsError);
+
+      return res.status(500).json({
+        success: false,
+        message: "Could not retrieve order items.",
+      });
+    }
+
+    // 5. Fetch commissions only for the seller
+    let commissions = [];
+
+    if (role === "seller") {
+      const {
+        data: commissionData,
+        error: commissionError,
+      } = await supabaseAdmin
+        .from("nasara_marketplace_commissions")
+        .select("*")
+        .eq("seller_id", user.id)
+        .in("order_id", orderIds);
+
+      if (commissionError) {
+        console.error("Nasara commission fetch error:", commissionError);
+
+        return res.status(500).json({
+          success: false,
+          message: "Could not retrieve commission details.",
+        });
+      }
+
+      commissions = commissionData || [];
+    }
+
+    // 6. Attach items and seller-only commission information
+    const result = orders.map((order) => {
+      const items = (orderItems || []).filter(
+        (item) => item.order_id === order.id
+      );
+
+      const commission =
+        role === "seller"
+          ? commissions.find(
+              (item) => item.order_id === order.id
+            ) || null
+          : undefined;
+
+      return {
+        ...order,
+        items,
+        ...(role === "seller" ? { commission } : {}),
+      };
+    });
+
+    return res.json({
+      success: true,
+      role,
+      count: result.length,
+      orders: result,
+    });
+
+  } catch (error) {
+    console.error("Nasara marketplace orders error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while retrieving orders.",
+    });
+  }
+});
 /* ================= WEBSITE GENERATOR SUPABASE ADMIN ================= */
 
 const websiteGeneratorAdmin = createClient(
