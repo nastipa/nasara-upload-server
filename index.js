@@ -12011,37 +12011,45 @@ if (existing) {
     }
 
     // --------------------------------------------------------
-    // 7. SAVE HISTORY
-    // --------------------------------------------------------
+// 7. SAVE ACCURATE CAMPAIGN HISTORY
+// --------------------------------------------------------
 
-    const { error: updateError } = await supabaseAdmin
-      .from(NASARA_ENGAGEMENT_HISTORY)
-      .update({
-        status,
-        target_count: targetUsers.length,
-        sent_count: nativeSent,
-        failed_count: nativeFailed,
-        completed_at: new Date().toISOString(),
-      })
-      .eq("notification_date", campaignDate);
+const totalSent = nativeSent + browserSent;
+const totalFailed = nativeFailed + browserFailed;
 
-    if (updateError) throw updateError;
+const totalTarget = targetUsers.length + browserSent + browserFailed;
 
-    console.log("NASARA DAILY ENGAGEMENT COMPLETED:", {
-      date: campaignDate,
-      feature: campaign.feature_key,
-      native: {
-        target: targetUsers.length,
-        accepted: nativeSent,
-        failed: nativeFailed,
-      },
-      browser: {
-        accepted: browserSent,
-        failed: browserFailed,
-        error: browserError,
-      },
-      status,
-    });
+const { error: updateError } = await supabaseAdmin
+  .from(NASARA_ENGAGEMENT_HISTORY)
+  .update({
+    status,
+    target_count: totalTarget,
+    sent_count: totalSent,
+    failed_count: totalFailed,
+    completed_at: new Date().toISOString(),
+  })
+  .eq("notification_date", campaignDate);
+
+if (updateError) throw updateError;
+
+console.log("NASARA DAILY ENGAGEMENT COMPLETED:", {
+  date: campaignDate,
+  native: {
+    target: targetUsers.length,
+    accepted: nativeSent,
+    failed: nativeFailed,
+  },
+  browser: {
+    accepted: browserSent,
+    failed: browserFailed,
+  },
+  combined: {
+    target: totalTarget,
+    accepted: totalSent,
+    failed: totalFailed,
+  },
+  status,
+});
 
   } catch (error) {
     console.error(
